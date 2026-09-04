@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+bookoff_ids.json
+bookoff_mail_config.json
