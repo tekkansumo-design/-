@@ -1,6 +1,7 @@
 package com.tekkansumo.bookoffchecker
 
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -18,6 +19,8 @@ object Scraper {
     private val SHOP_PATH = Regex("/shop/shop\\d+", RegexOption.IGNORE_CASE)
 
     private val client: OkHttpClient = OkHttpClient.Builder()
+        // 既定は idle 5 本。同時接続を増やすと足りずに毎回張り直しになる
+        .connectionPool(ConnectionPool(Checker.MAX_WORKERS * 2, 5, TimeUnit.MINUTES))
         .connectTimeout(25, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
         .callTimeout(45, TimeUnit.SECONDS)

@@ -16,6 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check generated asset is up to date
+        run: python3 tools/gen_android_asset.py --check
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:

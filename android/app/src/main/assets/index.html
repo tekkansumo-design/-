@@ -1,17 +1,17 @@
 <!doctype html><html lang="ja"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BOOKOFF 在庫店舗チェッカー</title>
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#16110d;--panel:#1d1712;--line:#2a2620;--ink:#f0e6da;--dim:#a08d78;
---hit:#e0a458;--warn:#c8553d;--ok:#7f9c6d}
+--hit:#e0a458;--warn:#c8553d;--ok:#7f9c6d;--chip:#241d16}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-size:14px;
-font-family:"Yu Gothic UI","Meiryo",system-ui,sans-serif}
-.mono{font-family:"Space Mono",Consolas,monospace}
+font-family:"Yu Gothic UI","Meiryo",system-ui,sans-serif;
+-webkit-text-size-adjust:100%}
+.mono{font-variant-numeric:tabular-nums}
 header{position:sticky;top:0;z-index:9;background:var(--panel);
-border-bottom:1px solid var(--line);padding:10px 12px}
-h1{font-size:14px;margin:0 0 8px;letter-spacing:.06em;font-weight:700;color:var(--hit)}
+border-bottom:1px solid var(--line);padding:10px 12px 0}
+h1{font-size:13px;margin:0 0 8px;letter-spacing:.06em;font-weight:700;color:var(--hit)}
 .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 button{background:var(--line);color:var(--ink);border:1px solid #3a352c;
 border-radius:6px;padding:7px 13px;font-size:13px;cursor:pointer}
@@ -24,19 +24,37 @@ button:disabled{opacity:.4;cursor:default}
 #bar.on div{animation:pulse 1.4s ease-in-out infinite}
 @keyframes pulse{50%{opacity:.45}}
 #stat{color:var(--dim);font-size:12px;margin-top:6px}
-.tabs{display:flex;gap:4px;margin-top:8px}
-.tab{padding:5px 12px;border-radius:6px 6px 0 0;font-size:12px;cursor:pointer;
-color:var(--dim);border:1px solid transparent}
-.tab.on{background:var(--bg);color:var(--hit);border-color:var(--line);border-bottom-color:var(--bg)}
-main{padding:8px 12px 40px}
-table{width:100%;border-collapse:collapse}
-td,th{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
-th{color:var(--dim);font-size:11px;font-weight:600}
-a{color:var(--hit);text-decoration:none}a:hover{text-decoration:underline}
-.cnt{text-align:right;font-weight:700}
-.cnt.z{color:var(--dim);font-weight:400}
-.shops{color:var(--dim);font-size:12px;line-height:1.7;margin-top:4px}
-.err{color:var(--warn);font-size:11px;margin-top:4px}
+#sum{color:var(--dim);font-size:11px;margin-top:4px;line-height:1.6}
+#sum b{color:var(--hit);font-weight:700}
+#sum .sep{opacity:.4;margin:0 7px}
+.filt{display:flex;gap:8px;align-items:center;margin-top:8px}
+.filt input[type=text]{flex:1;padding:6px 9px;font-size:12px}
+.sw{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--dim);
+white-space:nowrap;margin:0;cursor:pointer;user-select:none}
+.sw input{width:auto;margin:0}
+.sw.on{color:var(--hit)}
+.tabs{display:flex;gap:4px;margin-top:9px}
+.tab{padding:6px 13px;border-radius:6px 6px 0 0;font-size:12px;cursor:pointer;
+color:var(--dim);border:1px solid transparent;border-bottom:none}
+.tab.on{background:var(--bg);color:var(--hit);border-color:var(--line)}
+main{padding:10px 12px 40px}
+a{color:var(--hit);text-decoration:none}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+padding:11px 12px;margin:0 0 8px}
+.card.z{opacity:.5}
+.chead{display:flex;gap:10px;align-items:flex-start}
+.ttl{flex:1;font-size:14px;font-weight:600;line-height:1.45;word-break:break-word}
+.badge{flex:none;font-size:12px;font-weight:700;color:var(--hit);background:#2b2118;
+border:1px solid #3a2c1d;border-radius:12px;padding:2px 10px;white-space:nowrap}
+.badge.z{color:var(--dim);background:transparent;border-color:var(--line);font-weight:400}
+.chips2{margin-top:8px;display:flex;flex-wrap:wrap;gap:5px}
+.sc{font-size:12px;color:var(--hit);background:var(--chip);border:1px solid var(--line);
+border-radius:13px;padding:3px 10px;line-height:1.55;word-break:break-word}
+.sc.p{color:var(--dim)}
+.err{color:var(--warn);font-size:11px;margin-top:6px}
+.pref{font-size:11px;color:var(--dim);font-weight:400;margin-left:7px}
+.empty{color:var(--dim);font-size:13px;text-align:center;padding:44px 14px;line-height:1.9}
+.empty .big{font-size:15px;color:var(--ink);display:block;margin-bottom:6px}
 dialog{background:var(--panel);color:var(--ink);border:1px solid var(--line);
 border-radius:10px;padding:16px;width:min(600px,94vw)}
 dialog::backdrop{background:#000a}
@@ -48,6 +66,7 @@ label{display:block;color:var(--dim);font-size:11px;margin:9px 0 3px}
 .chip{border:1px solid var(--line);border-radius:12px;padding:3px 9px;font-size:11px;
 cursor:pointer;color:var(--dim)}
 .chip.on{background:var(--hit);color:#1b1309;border-color:var(--hit);font-weight:700}
+.note{color:var(--dim);font-size:11px;line-height:1.7}
 </style></head><body>
 <header>
 <h1>BOOKOFF 在庫店舗チェッカー</h1>
@@ -62,6 +81,11 @@ cursor:pointer;color:var(--dim)}
 </div>
 <div id="bar"><div></div></div>
 <div id="stat" class="mono">待機中</div>
+<div id="sum" class="mono"></div>
+<div class="filt">
+<input type="text" id="q" placeholder="商品名・店舗名でしぼり込み">
+<label class="sw on" id="swHit"><input type="checkbox" id="onlyHit" checked>在庫ありのみ</label>
+</div>
 <div class="tabs"><div class="tab on" data-v="item">商品別</div>
 <div class="tab" data-v="shop">店舗別</div></div>
 </header>
@@ -70,6 +94,12 @@ cursor:pointer;color:var(--dim)}
 <dialog id="dIds">
 <div style="font-weight:600">商品ID（1行1件）</div>
 <textarea id="idsBox"></textarea>
+<div id="bmWrap">
+<label>お気に入りから取り込む</label>
+<div class="note">下の1行をブックマークとして登録し、ログイン済みのお気に入りページで
+実行すると、そのページの商品IDが<b>追記</b>されます。ページを送りながら繰り返せます。</div>
+<textarea id="bmBox" readonly style="height:70px;font-size:11px;margin-top:5px"></textarea>
+</div>
 <div class="row" style="justify-content:flex-end;margin-top:10px">
 <button onclick="dIds.close()">閉じる</button><button class="go" id="idsSave">保存</button></div>
 </dialog>
@@ -85,120 +115,273 @@ cursor:pointer;color:var(--dim)}
 <button onclick="dMail.close()">閉じる</button>
 <button id="mPrev">プレビュー</button>
 <button class="go" id="mSend">送信</button></div>
-<div id="mMsg" style="color:var(--dim);font-size:12px;margin-top:8px"></div>
+<div id="mMsg" class="note" style="margin-top:8px"></div>
 </dialog>
 
 <dialog id="dPrev" style="padding:0;width:min(680px,96vw)">
-<iframe id="prevFrame" style="width:100%;height:68vh;border:0;background:#16110d"></iframe>
+<iframe id="prevFrame" style="width:100%;height:66vh;border:0;background:#16110d"></iframe>
 <div class="row" style="justify-content:flex-end;padding:8px 10px">
 <button onclick="dPrev.close()">閉じる</button></div>
 </dialog>
 
 <script>
+
 // 通信は Flask ではなく Kotlin 側の App ブリッジ（MainActivity.Bridge）を使う。
-// 画面の組み立て（render など）は Web 版と同じ。
-let ITEMS={},VIEW='item';
+// @JavascriptInterface は同期呼び出しなので Promise に包んで形を揃える。
+const BOOKMARKLET='';   // アプリでは「取込」画面を使うので不要
+const T={
+  state:async()=>JSON.parse(App.getState()),
+  ids:async()=>JSON.parse(App.getIds()),
+  saveIds:async l=>JSON.parse(App.saveIds(JSON.stringify(l))),
+  reset:async()=>App.reset(),
+  cancel:async()=>App.cancel(),
+  prefectures:async()=>JSON.parse(App.getPrefectures()),
+  mailConfig:async()=>JSON.parse(App.getMailConfig()),
+  saveMailConfig:async o=>App.saveMailConfig(JSON.stringify(o)),
+  mailPreview:async p=>App.mailPreview(JSON.stringify(p)),
+  sendMail:async p=>App.sendMail(JSON.stringify(p)),   // 結果は __native('mail') で届く
+  csv:()=>App.exportCsv(),
+  openImport:()=>App.openImport(),
+  start:async()=>App.start()
+};
+// Kotlin (Checker) からのイベント受け口
+window.__native=(kind,data)=>__event(kind,data);
+
+
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,
   c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const PROD='https://shopping.bookoff.co.jp/used/';
+const IN_APP=!!window.App;
+// アプリ内では新規タブが開けないので同一画面で遷移させ、Kotlin 側が外部ブラウザに渡す
+const LT=IN_APP?'':' target="_blank" rel="noopener"';
+const PREFS=['北海道','青森','岩手','宮城','秋田','山形','福島','茨城','栃木','群馬',
+'埼玉','千葉','東京','神奈川','新潟','富山','石川','福井','山梨','長野','岐阜','静岡',
+'愛知','三重','滋賀','京都','大阪','兵庫','奈良','和歌山','鳥取','島根','岡山','広島',
+'山口','徳島','香川','愛媛','高知','福岡','佐賀','長崎','熊本','大分','宮崎','鹿児島','沖縄'];
+
+let ITEMS={},VIEW='item',ONLY_HIT=true,Q='',RUNNING=false;
+let DONE=0,TOTAL=0,WORKERS=0;
+let T0=0,D0=0,TICK=null;      // 速度と残り時間の計算用
+
+/* ── 整形 ───────────────────────────────── */
+const nrm=s=>String(s||'').toLowerCase();
+
+// 店舗名の頭の「BOOKOFF」は全店に付くので削って地名を見やすくする
+function shortShop(n){
+  return String(n||'').replace(/^(BOOK\s*[・･]?\s*OFF|ブックオフ)\s*/i,'').trim()||n;
+}
+function prefOf(n){
+  for(const p of PREFS) if(String(n||'').includes(p)) return p;
+  return '';
+}
+function dur(sec){
+  sec=Math.round(sec);
+  if(sec<60) return sec+'秒';
+  const m=Math.floor(sec/60);
+  if(m<60) return m+'分'+(sec%60?(sec%60)+'秒':'');
+  return Math.floor(m/60)+'時間'+(m%60?(m%60)+'分':'');
+}
 const pct=(d,t)=>t>0?(d/t*100)+'%':'0%';
 
+/* ── 絞り込み ────────────────────────────── */
+function passes(r){
+  if(ONLY_HIT&&!r.count) return false;
+  if(Q){
+    const q=nrm(Q);
+    if(!nrm(r.name).includes(q)&&!r.shops.some(s=>nrm(s.name).includes(q))) return false;
+  }
+  return true;
+}
+function visible(){return Object.values(ITEMS).filter(passes);}
+
+/* ── 集計行 ─────────────────────────────── */
+function summary(){
+  const all=Object.values(ITEMS);
+  if(!all.length&&!TOTAL){$('#sum').textContent='';return;}
+  const hits=all.filter(r=>r.count>0).length;
+  const shops=new Set();
+  all.forEach(r=>r.shops.forEach(s=>shops.add(s.name)));
+  const sep='<span class="sep">/</span>';
+  let h=`確認 <b>${DONE}</b>${TOTAL?' / '+TOTAL:''}${sep}`
+       +`在庫あり <b>${hits}</b>${sep}店舗 <b>${shops.size}</b>`;
+  if(RUNNING){
+    const el=(Date.now()-T0)/1000, n=DONE-D0;
+    if(T0&&el>3&&n>0){
+      h+=`${sep}${Math.round(n/el*60)}件/分`;
+      const left=(TOTAL-DONE)/(n/el);
+      if(isFinite(left)&&left>0) h+=`${sep}残り約${dur(left)}`;
+    }
+    if(WORKERS) h+=`${sep}並列 ${WORKERS}`;
+  }
+  $('#sum').innerHTML=h;
+}
+
+/* ── 一覧 ───────────────────────────────── */
+function emptyBox(){
+  const total=Object.keys(ITEMS).length;
+  if(!total) return `<div class="empty"><span class="big">まだ結果がありません</span>
+    「商品ID」でIDを登録して「チェック開始」を押してください</div>`;
+  if(Q) return `<div class="empty"><span class="big">「${esc(Q)}」に一致する結果はありません</span>
+    しぼり込みを消すと ${total} 件すべて表示します</div>`;
+  if(ONLY_HIT) return `<div class="empty"><span class="big">在庫のある商品はまだありません</span>
+    「在庫ありのみ」を外すと ${total} 件すべて表示します</div>`;
+  return `<div class="empty">表示できる結果がありません</div>`;
+}
+
+function cardItem(r){
+  const chips=r.shops.map(s=>
+    `<a class="sc" href="${esc(s.url)}"${LT} title="${esc(s.name)}">${esc(shortShop(s.name))}</a>`
+  ).join('');
+  return `<div class="card${r.count?'':' z'}">
+    <div class="chead">
+      <div class="ttl"><a href="${PROD}${esc(r.pid)}"${LT}>${esc(r.name)}</a></div>
+      <div class="badge${r.count?'':' z'}">${r.count?r.count+'店':'なし'}</div>
+    </div>
+    ${chips?`<div class="chips2">${chips}</div>`:''}
+    ${r.error?`<div class="err">${esc(r.error)}</div>`:''}
+  </div>`;
+}
+
+function cardShop(name,g){
+  const p=prefOf(name);
+  const chips=g.items.map(r=>
+    `<a class="sc p" href="${PROD}${esc(r.pid)}"${LT}>${esc(r.name)}</a>`).join('');
+  return `<div class="card">
+    <div class="chead">
+      <div class="ttl"><a href="${esc(g.url)}"${LT}>${esc(shortShop(name))}</a>
+        ${p?`<span class="pref">${esc(p)}</span>`:''}</div>
+      <div class="badge">${g.items.length}点</div>
+    </div>
+    <div class="chips2">${chips}</div>
+  </div>`;
+}
+
+function render(){
+  const list=visible();
+  let html;
+  if(!list.length){
+    html=emptyBox();
+  }else if(VIEW==='item'){
+    list.sort((a,b)=>b.count-a.count||String(a.pid).localeCompare(String(b.pid)));
+    html=list.map(cardItem).join('');
+  }else{
+    const by={};
+    list.forEach(r=>r.shops.forEach(s=>{
+      (by[s.name]=by[s.name]||{url:s.url,items:[]}).items.push(r);}));
+    const keys=Object.keys(by).sort((a,b)=>
+      by[b].items.length-by[a].items.length||a.localeCompare(b,'ja'));
+    html=keys.length?keys.map(k=>cardShop(k,by[k])).join('')
+                    :`<div class="empty">在庫のある店舗はまだありません</div>`;
+  }
+  $('#view').innerHTML=html;
+  summary();
+}
+
+/* ── 実行状態 ────────────────────────────── */
+function setRunning(on){
+  RUNNING=on;
+  $('#bRun').disabled=on; $('#bStop').disabled=!on;
+  $('#bar').classList.toggle('on',on);
+  if(on){
+    if(!TICK) TICK=setInterval(summary,2000);   // 行が来ない間も残り時間を更新する
+  }else{
+    clearInterval(TICK); TICK=null;
+  }
+}
+function markStart(){T0=Date.now();D0=DONE;}
+
+function applyRow(d){
+  ITEMS[d.pid]={pid:d.pid,name:d.name,count:d.count,shops:d.shops,error:d.error};
+  DONE=d.done; TOTAL=d.total; WORKERS=d.workers;
+  $('#bar div').style.width=pct(DONE,TOTAL);
+  $('#stat').textContent=`${DONE} / ${TOTAL} 件を確認`;
+  render();
+}
+
+// トランスポート（Web は SSE、アプリは Kotlin）から呼ばれる共通の受け口
+function __event(kind,d){
+  if(kind==='row')        applyRow(d);
+  else if(kind==='status')$('#stat').textContent=d.msg;
+  else if(kind==='end'){
+    setRunning(false);
+    DONE=d.done; TOTAL=d.total;
+    $('#stat').textContent=d.cancelled?`中止しました（${d.done}件）`:`完了`;
+    render();
+  }
+  else if(kind==='mail')  $('#mMsg').textContent=d.msg;
+}
+
+async function sync(){
+  const d=await T.state();
+  ITEMS={}; d.items.forEach(i=>ITEMS[i.pid]=i);
+  DONE=d.done; TOTAL=d.total; WORKERS=d.workers;
+  $('#bar div').style.width=pct(DONE,TOTAL);
+  setRunning(d.running);
+  if(d.running){ if(!T0) markStart(); $('#stat').textContent=`${DONE} / ${TOTAL} 件を確認`; }
+  else if(TOTAL)                      $('#stat').textContent='完了';
+  render();
+  return d;
+}
+
+/* ── 操作 ───────────────────────────────── */
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   t.classList.add('on'); VIEW=t.dataset.v; render();});
 
-function render(){
-  const list=Object.values(ITEMS);
-  if(VIEW==='item'){
-    list.sort((a,b)=>b.count-a.count);
-    $('#view').innerHTML='<table><thead><tr><th>商品</th><th class="cnt">店舗</th></tr></thead><tbody>'+
-      list.map(r=>`<tr><td>
-        <a href="https://shopping.bookoff.co.jp/used/${esc(r.pid)}">${esc(r.name)}</a>
-        ${r.count?`<div class="shops">${r.shops.map(s=>`<a href="${esc(s.url)}">${esc(s.name)}</a>`).join(' ・ ')}</div>`:''}
-        ${r.error?`<div class="err">${esc(r.error)}</div>`:''}
-        </td><td class="cnt mono ${r.count?'':'z'}">${r.count}</td></tr>`).join('')+
-      '</tbody></table>';
-  }else{
-    const by={};
-    list.forEach(r=>r.shops.forEach(s=>{(by[s.name]=by[s.name]||{url:s.url,items:[]}).items.push(r)}));
-    const keys=Object.keys(by).sort((a,b)=>by[b].items.length-by[a].items.length);
-    $('#view').innerHTML='<table><thead><tr><th>店舗</th><th class="cnt">点数</th></tr></thead><tbody>'+
-      keys.map(k=>`<tr><td><a href="${esc(by[k].url)}">${esc(k)}</a>
-        <div class="shops">${by[k].items.map(r=>esc(r.name)).join(' ・ ')}</div></td>
-        <td class="cnt mono">${by[k].items.length}</td></tr>`).join('')+'</tbody></table>';
-  }
-}
+$('#onlyHit').onchange=e=>{
+  ONLY_HIT=e.target.checked;
+  $('#swHit').classList.toggle('on',ONLY_HIT);
+  render();};
+$('#q').oninput=e=>{Q=e.target.value.trim();render();};
 
-function setRunning(on){
-  $('#bRun').disabled=on; $('#bStop').disabled=!on;
-  $('#bar').classList.toggle('on',on);
-}
+$('#bRun').onclick=async()=>{
+  setRunning(true); markStart();
+  $('#stat').textContent='開始しています...';
+  await T.start();};
+$('#bStop').onclick=async()=>{
+  $('#bStop').disabled=true;
+  $('#stat').textContent='中止しています...';
+  await T.cancel();};
+$('#bCsv').onclick=()=>T.csv();
+$('#bReset').onclick=async()=>{
+  if(!await T.reset()){$('#stat').textContent='実行中はリセットできません';return;}
+  ITEMS={};DONE=0;TOTAL=0;T0=0;
+  $('#bar div').style.width='0%';$('#stat').textContent='リセットしました';
+  render();};
 
-// 画面を離れている間の進捗はサービス側で進むので、戻ったら状態を取り直す
-function sync(){
-  const d=JSON.parse(App.getState());
-  ITEMS={}; d.items.forEach(i=>ITEMS[i.pid]=i); render();
-  $('#bar div').style.width=pct(d.done,d.total);
-  setRunning(d.running);
-  if(d.running)      $('#stat').textContent=`${d.done} / ${d.total}　並列 ${d.workers}`;
-  else if(d.total)   $('#stat').textContent=`完了 ${d.done}件`;
-  return d;
-}
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)sync();});
-
-// Kotlin (Checker) からのイベント受け口
-window.__native=(kind,d)=>{
-  if(kind==='row'){
-    ITEMS[d.pid]={pid:d.pid,name:d.name,count:d.count,shops:d.shops,error:d.error};
-    render();
-    $('#bar div').style.width=pct(d.done,d.total);
-    $('#stat').textContent=`${d.done} / ${d.total}　並列 ${d.workers}`;
-  }else if(kind==='status'){
-    $('#stat').textContent=d.msg;
-  }else if(kind==='end'){
-    setRunning(false);
-    $('#stat').textContent=d.cancelled
-      ?`中止（${d.done}件）`
-      :`完了 ${d.done}件　在庫あり ${d.hits}件`;
-  }else if(kind==='mail'){
-    $('#mMsg').textContent=d.msg;
-  }
-};
-
-$('#bRun').onclick=()=>{setRunning(true);$('#stat').textContent='開始しています...';App.start();};
-$('#bStop').onclick=()=>{$('#bStop').disabled=true;
-  $('#stat').textContent='中止しています...';App.cancel();};
-$('#bImport').onclick=()=>App.openImport();
-$('#bCsv').onclick=()=>App.exportCsv();
-$('#bReset').onclick=()=>{
-  if(!App.reset()){$('#stat').textContent='実行中はリセットできません';return;}
-  ITEMS={};render();$('#stat').textContent='リセットしました';
-  $('#bar div').style.width='0%';};
-
-$('#bIds').onclick=()=>{
-  $('#idsBox').value=JSON.parse(App.getIds()).join('\n'); dIds.showModal();};
-$('#idsSave').onclick=()=>{
+$('#bIds').onclick=async()=>{
+  $('#idsBox').value=(await T.ids()).join('\n');
+  if(!IN_APP) $('#bmBox').value=BOOKMARKLET;
+  dIds.showModal();};
+$('#idsSave').onclick=async()=>{
   const ids=$('#idsBox').value.split('\n').map(s=>s.trim()).filter(Boolean);
-  const r=JSON.parse(App.saveIds(JSON.stringify(ids)));
+  const r=await T.saveIds(ids);
   dIds.close();$('#stat').textContent=r.length+'件を保存しました';};
 
-$('#bMail').onclick=()=>{
-  const p=JSON.parse(App.getPrefectures());
+$('#bMail').onclick=async()=>{
+  const p=await T.prefectures();
   const src=p.found.length?p.found:p.all;
   $('#prefs').innerHTML=src.map(x=>`<span class="chip" data-p="${esc(x)}">${esc(x)}</span>`).join('');
   $('#prefs').querySelectorAll('.chip').forEach(c=>c.onclick=()=>c.classList.toggle('on'));
-  const c=JSON.parse(App.getMailConfig());
+  const c=await T.mailConfig();
   $('#mFrom').value=c.from||'';$('#mTo').value=c.to||'';$('#mPw').value=c.password||'';
   $('#mMsg').textContent='';
   dMail.showModal();};
 const picked=()=>[...$('#prefs').querySelectorAll('.chip.on')].map(c=>c.dataset.p);
-function saveMail(){App.saveMailConfig(JSON.stringify(
-  {from:$('#mFrom').value,password:$('#mPw').value,to:$('#mTo').value}));}
-$('#mPrev').onclick=()=>{saveMail();
-  $('#prevFrame').srcdoc=App.mailPreview(JSON.stringify(picked()));
-  dPrev.showModal();};
-$('#mSend').onclick=()=>{saveMail();$('#mMsg').textContent='送信中...';
-  App.sendMail(JSON.stringify(picked()));};
+async function saveMail(){await T.saveMailConfig(
+  {from:$('#mFrom').value,password:$('#mPw').value,to:$('#mTo').value});}
+$('#mPrev').onclick=async()=>{await saveMail();
+  $('#prevFrame').srcdoc=await T.mailPreview(picked()); dPrev.showModal();};
+$('#mSend').onclick=async()=>{await saveMail();$('#mMsg').textContent='送信中...';
+  try{ await T.sendMail(picked()); }
+  catch(e){ $('#mMsg').textContent='送信に失敗しました: '+e; }};
 
+// 取込はアプリ限定。Web 版はブックマークレットを使う
+if(IN_APP){ $('#bmWrap').style.display='none'; $('#bImport').onclick=()=>T.openImport(); }
+else      { $('#bImport').style.display='none'; }
+
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)sync();});
 sync();
+
 </script></body></html>

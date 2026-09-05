@@ -25,8 +25,9 @@ data class ItemResult(
 object Checker {
 
     const val MIN_WORKERS = 1
-    const val MAX_WORKERS = 5
-    const val START_WORKERS = 3
+    const val MAX_WORKERS = 10      // 上限。ここまで上がるかはサイト側の許容次第
+    const val START_WORKERS = 5
+    const val RAMP_AFTER = 3        // 連続成功がこれだけ続いたら枠を1つ増やす
     private val BACKOFF = intArrayOf(15, 30, 60, 120, 180)
 
     private val lock = ReentrantLock()
@@ -129,7 +130,7 @@ object Checker {
         lock.withLock {
             okStreak++
             errLevel = 0
-            if (okStreak >= 5 && workers < MAX_WORKERS) {
+            if (okStreak >= RAMP_AFTER && workers < MAX_WORKERS) {
                 workers++
                 okStreak = 0
                 gate.signalAll()   // 枠が増えたので待機中のスレッドを起こす
