@@ -706,7 +706,10 @@ button:disabled{opacity:.4;cursor:default}
 #sum b{color:var(--hit);font-weight:700}
 #sum .sep{opacity:.4;margin:0 7px}
 .filt{display:flex;gap:8px;align-items:center;margin-top:8px}
-.filt input[type=text]{flex:1;padding:6px 9px;font-size:12px}
+.qwrap{flex:1;position:relative;display:flex}
+.qwrap input{padding:6px 26px 6px 9px;font-size:12px}
+#qx{position:absolute;right:6px;top:50%;transform:translateY(-50%);cursor:pointer;
+color:var(--dim);font-size:15px;line-height:1;padding:2px 4px}
 .sw{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--dim);
 white-space:nowrap;margin:0;cursor:pointer;user-select:none}
 .sw input{width:auto;margin:0}
@@ -761,7 +764,8 @@ cursor:pointer;color:var(--dim)}
 <div id="stat" class="mono">待機中</div>
 <div id="sum" class="mono"></div>
 <div class="filt">
-<input type="text" id="q" placeholder="商品名・店舗名でしぼり込み">
+<div class="qwrap"><input type="text" id="q" placeholder="商品名・店舗名でしぼり込み">
+<span id="qx" hidden>×</span></div>
 <label class="sw on" id="swHit"><input type="checkbox" id="onlyHit" checked>在庫ありのみ</label>
 </div>
 <div class="tabs"><div class="tab on" data-v="item">商品別</div>
@@ -850,6 +854,14 @@ function passes(r){
   }
   return true;
 }
+// 絞り込み語に一致した店舗だけを返す。商品名の側で一致した場合は全店舗。
+// これをしないと「東京」で絞っても同じ商品の大阪店まで並んでしまう。
+function matched(r){
+  if(!Q) return r.shops;
+  const q=nrm(Q);
+  const hit=r.shops.filter(s=>nrm(s.name).includes(q));
+  return hit.length?hit:r.shops;
+}
 function visible(){return Object.values(ITEMS).filter(passes);}
 
 /* ── 集計行 ─────────────────────────────── */
@@ -862,6 +874,7 @@ function summary(){
   const sep='<span class="sep">/</span>';
   let h=`確認 <b>${DONE}</b>${TOTAL?' / '+TOTAL:''}${sep}`
        +`在庫あり <b>${hits}</b>${sep}店舗 <b>${shops.size}</b>`;
+  if(Q) h+=`${sep}「${esc(Q)}」で <b>${visible().length}</b> 件表示`;
   if(RUNNING){
     const el=(Date.now()-T0)/1000, n=DONE-D0;
     if(T0&&el>3&&n>0){
@@ -887,13 +900,17 @@ function emptyBox(){
 }
 
 function cardItem(r){
-  const chips=r.shops.map(s=>
+  const shops=matched(r);
+  const chips=shops.map(s=>
     `<a class="sc" href="${esc(s.url)}"${LT} title="${esc(s.name)}">${esc(shortShop(s.name))}</a>`
   ).join('');
+  // 絞り込みで店舗を減らしたときは「2/5店」と出して隠れている数を示す
+  const label=!r.count?'なし'
+    :(shops.length<r.count?`${shops.length}/${r.count}店`:`${r.count}店`);
   return `<div class="card${r.count?'':' z'}">
     <div class="chead">
       <div class="ttl"><a href="${PROD}${esc(r.pid)}"${LT}>${esc(r.name)}</a></div>
-      <div class="badge${r.count?'':' z'}">${r.count?r.count+'店':'なし'}</div>
+      <div class="badge${r.count?'':' z'}">${label}</div>
     </div>
     ${chips?`<div class="chips2">${chips}</div>`:''}
     ${r.error?`<div class="err">${esc(r.error)}</div>`:''}
@@ -924,7 +941,7 @@ function render(){
     html=list.map(cardItem).join('');
   }else{
     const by={};
-    list.forEach(r=>r.shops.forEach(s=>{
+    list.forEach(r=>matched(r).forEach(s=>{
       (by[s.name]=by[s.name]||{url:s.url,items:[]}).items.push(r);}));
     const keys=Object.keys(by).sort((a,b)=>
       by[b].items.length-by[a].items.length||a.localeCompare(b,'ja'));
@@ -990,7 +1007,8 @@ $('#onlyHit').onchange=e=>{
   ONLY_HIT=e.target.checked;
   $('#swHit').classList.toggle('on',ONLY_HIT);
   render();};
-$('#q').oninput=e=>{Q=e.target.value.trim();render();};
+$('#q').oninput=e=>{Q=e.target.value.trim();$('#qx').hidden=!Q;render();};
+$('#qx').onclick=()=>{$('#q').value='';Q='';$('#qx').hidden=true;render();};
 
 $('#bRun').onclick=async()=>{
   setRunning(true); markStart();
