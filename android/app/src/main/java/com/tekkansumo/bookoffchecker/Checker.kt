@@ -193,8 +193,8 @@ object Checker {
                 ItemResult(pid, pid, emptyList(), "internal: ${e.javaClass.simpleName}")
             }
 
-            val d: Int
-            val t: Int
+            var d = 0
+            var t = 0
             lock.withLock {
                 resultsMap[pid] = res
                 done++

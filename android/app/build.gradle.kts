@@ -28,6 +28,19 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    // android-mail と android-activation が同名のメタファイルを持つため
+    packaging {
+        resources {
+            excludes += setOf(
+                "META-INF/LICENSE.txt",
+                "META-INF/NOTICE.txt",
+                "META-INF/LICENSE",
+                "META-INF/NOTICE",
+                "META-INF/DEPENDENCIES"
+            )
+        }
+    }
 }
 
 dependencies {
