@@ -6,17 +6,18 @@ Web 版とアプリ版で画面を二重管理すると必ず食い違うので�
 ロジック（UI_HTML / UI_JS）は bookoff_web.py の 1 か所だけに置き、通信部分
 だけをここで差し替える。
 
-  python3 tools/gen_android_asset.py          生成
+bookoff_web.py は Pydroid 3 に 1 ファイルで置けることを保ちたいので分割せず、
+かといって import すると flask が要る（CI に web フレームワークを入れるのは
+筋が悪い）。そのためソースから文字列リテラルを取り出す。
+
+  python3 tools/gen_android_asset.py           生成
   python3 tools/gen_android_asset.py --check   生成物が最新か確認（CI 用）
 """
 import sys
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(BASE))
-
-import bookoff_web as W  # noqa: E402
-
+SRC = BASE / "bookoff_web.py"
 OUT = BASE / "android/app/src/main/assets/index.html"
 
 # アプリ版の通信部分。Kotlin の MainActivity.Bridge を叩く。
@@ -44,12 +45,27 @@ window.__native=(kind,data)=>__event(kind,data);
 """
 
 
-def build():
-    return (W.UI_HTML + "\n<script>\n" + APP_JS + "\n" + W.UI_JS
-            + "\n</script></body></html>\n")
+def literal(src: str, name: str) -> str:
+    """`NAME = r\"\"\"...\"\"\"` の中身を取り出す。"""
+    key = f'{name} = r"""'
+    i = src.find(key)
+    if i < 0:
+        raise SystemExit(f"{SRC.name} に {key} が見つかりません")
+    i += len(key)
+    j = src.find('"""', i)
+    if j < 0:
+        raise SystemExit(f"{SRC.name} の {name} が閉じていません")
+    return src[i:j]
 
 
-def main():
+def build() -> str:
+    src = SRC.read_text(encoding="utf-8")
+    ui_html = literal(src, "UI_HTML")
+    ui_js = literal(src, "UI_JS")
+    return ui_html + "\n<script>\n" + APP_JS + "\n" + ui_js + "\n</script></body></html>\n"
+
+
+def main() -> int:
     html = build()
     if "--check" in sys.argv:
         cur = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
