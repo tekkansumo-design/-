@@ -32,6 +32,12 @@
             android:label="お気に入りから取り込む"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode" />
 
+        <activity
+            android:name=".DiagnoseActivity"
+            android:exported="false"
+            android:label="取得の診断"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode" />
+
         <service
             android:name=".CheckService"
             android:exported="false"

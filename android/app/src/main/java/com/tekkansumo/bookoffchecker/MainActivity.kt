@@ -206,6 +206,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun openDiagnose() {
+            runOnUiThread {
+                startActivity(Intent(this@MainActivity, DiagnoseActivity::class.java))
+            }
+        }
+
+        @JavascriptInterface
         fun exportCsv() {
             runOnUiThread { shareCsv() }
         }

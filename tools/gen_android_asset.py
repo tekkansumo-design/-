@@ -38,6 +38,7 @@ const T={
   sendMail:async p=>App.sendMail(JSON.stringify(p)),   // 結果は __native('mail') で届く
   csv:()=>App.exportCsv(),
   openImport:()=>App.openImport(),
+  openDiagnose:()=>App.openDiagnose(),
   start:async()=>App.start()
 };
 // Kotlin (Checker) からのイベント受け口

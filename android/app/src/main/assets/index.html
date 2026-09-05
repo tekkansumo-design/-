@@ -81,6 +81,7 @@ cursor:pointer;color:var(--dim)}
 <button class="stop" id="bStop" disabled>中止</button>
 <button id="bIds">商品ID</button>
 <button id="bImport">取込</button>
+<button id="bDiag">診断</button>
 <button id="bMail">メール</button>
 <button id="bCsv">CSV</button>
 <button id="bReset">リセット</button>
@@ -149,6 +150,7 @@ const T={
   sendMail:async p=>App.sendMail(JSON.stringify(p)),   // 結果は __native('mail') で届く
   csv:()=>App.exportCsv(),
   openImport:()=>App.openImport(),
+  openDiagnose:()=>App.openDiagnose(),
   start:async()=>App.start()
 };
 // Kotlin (Checker) からのイベント受け口
@@ -423,8 +425,15 @@ $('#mSend').onclick=async()=>{await saveMail();$('#mMsg').textContent='送信中
   catch(e){ $('#mMsg').textContent='送信に失敗しました: '+e; }};
 
 // 取込はアプリ限定。Web 版はブックマークレットを使う
-if(IN_APP){ $('#bmWrap').style.display='none'; $('#bImport').onclick=()=>T.openImport(); }
-else      { $('#bImport').style.display='none'; }
+if(IN_APP){
+  $('#bmWrap').style.display='none';
+  $('#bImport').onclick=()=>T.openImport();
+  $('#bDiag').onclick=()=>T.openDiagnose();
+}else{
+  // Web 版は取込がブックマークレット、診断が /debug/<商品ID> なので隠す
+  $('#bImport').style.display='none';
+  $('#bDiag').style.display='none';
+}
 
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)sync();});
 sync();
