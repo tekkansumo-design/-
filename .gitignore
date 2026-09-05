@@ -2,3 +2,11 @@ __pycache__/
 *.pyc
 bookoff_ids.json
 bookoff_mail_config.json
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.iml
+.idea/

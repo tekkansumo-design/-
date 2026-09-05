@@ -1,0 +1,202 @@
+<!doctype html><html lang="ja"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BOOKOFF 在庫店舗チェッカー</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#16110d;--panel:#1d1712;--line:#2a2620;--ink:#f0e6da;--dim:#a08d78;
+--hit:#e0a458;--warn:#c8553d;--ok:#7f9c6d}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-size:14px;
+font-family:"Yu Gothic UI","Meiryo",system-ui,sans-serif}
+.mono{font-family:"Space Mono",Consolas,monospace}
+header{position:sticky;top:0;z-index:9;background:var(--panel);
+border-bottom:1px solid var(--line);padding:10px 12px}
+h1{font-size:14px;margin:0 0 8px;letter-spacing:.06em;font-weight:700;color:var(--hit)}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+button{background:var(--line);color:var(--ink);border:1px solid #3a352c;
+border-radius:6px;padding:7px 13px;font-size:13px;cursor:pointer}
+button:hover{background:#3a352c}
+button.go{background:var(--hit);color:#1b1309;border-color:var(--hit);font-weight:700}
+button.stop{background:var(--warn);color:#fff;border-color:var(--warn)}
+button:disabled{opacity:.4;cursor:default}
+#bar{height:3px;background:var(--line);margin-top:9px;border-radius:2px;overflow:hidden}
+#bar div{height:100%;width:0;background:var(--hit);transition:width .25s}
+#bar.on div{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.45}}
+#stat{color:var(--dim);font-size:12px;margin-top:6px}
+.tabs{display:flex;gap:4px;margin-top:8px}
+.tab{padding:5px 12px;border-radius:6px 6px 0 0;font-size:12px;cursor:pointer;
+color:var(--dim);border:1px solid transparent}
+.tab.on{background:var(--bg);color:var(--hit);border-color:var(--line);border-bottom-color:var(--bg)}
+main{padding:8px 12px 40px}
+table{width:100%;border-collapse:collapse}
+td,th{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--dim);font-size:11px;font-weight:600}
+a{color:var(--hit);text-decoration:none}a:hover{text-decoration:underline}
+.cnt{text-align:right;font-weight:700}
+.cnt.z{color:var(--dim);font-weight:400}
+.shops{color:var(--dim);font-size:12px;line-height:1.7;margin-top:4px}
+.err{color:var(--warn);font-size:11px;margin-top:4px}
+dialog{background:var(--panel);color:var(--ink);border:1px solid var(--line);
+border-radius:10px;padding:16px;width:min(600px,94vw)}
+dialog::backdrop{background:#000a}
+textarea,input{width:100%;background:#120e0a;color:var(--ink);
+border:1px solid var(--line);border-radius:6px;padding:8px;font-size:13px}
+textarea{height:180px;font-family:Consolas,monospace}
+label{display:block;color:var(--dim);font-size:11px;margin:9px 0 3px}
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin:8px 0;max-height:170px;overflow:auto}
+.chip{border:1px solid var(--line);border-radius:12px;padding:3px 9px;font-size:11px;
+cursor:pointer;color:var(--dim)}
+.chip.on{background:var(--hit);color:#1b1309;border-color:var(--hit);font-weight:700}
+</style></head><body>
+<header>
+<h1>BOOKOFF 在庫店舗チェッカー</h1>
+<div class="row">
+<button class="go" id="bRun">チェック開始</button>
+<button class="stop" id="bStop" disabled>中止</button>
+<button id="bIds">商品ID</button>
+<button id="bMail">メール</button>
+<button id="bCsv">CSV</button>
+<button id="bReset">リセット</button>
+</div>
+<div id="bar"><div></div></div>
+<div id="stat" class="mono">待機中</div>
+<div class="tabs"><div class="tab on" data-v="item">商品別</div>
+<div class="tab" data-v="shop">店舗別</div></div>
+</header>
+<main><div id="view"></div></main>
+
+<dialog id="dIds">
+<div style="font-weight:600">商品ID（1行1件）</div>
+<textarea id="idsBox"></textarea>
+<div class="row" style="justify-content:flex-end;margin-top:10px">
+<button onclick="dIds.close()">閉じる</button><button class="go" id="idsSave">保存</button></div>
+</dialog>
+
+<dialog id="dMail">
+<div style="font-weight:600">メール送信</div>
+<label>都道府県で絞り込み（未選択＝全件）</label>
+<div class="chips" id="prefs"></div>
+<label>送信元 Gmail</label><input id="mFrom">
+<label>アプリパスワード</label><input id="mPw" type="password">
+<label>送信先</label><input id="mTo">
+<div class="row" style="justify-content:flex-end;margin-top:12px">
+<button onclick="dMail.close()">閉じる</button>
+<button id="mPrev">プレビュー</button>
+<button class="go" id="mSend">送信</button></div>
+<div id="mMsg" style="color:var(--dim);font-size:12px;margin-top:8px"></div>
+</dialog>
+
+<dialog id="dPrev" style="padding:0;width:min(680px,96vw)">
+<iframe id="prevFrame" style="width:100%;height:68vh;border:0;background:#16110d"></iframe>
+<div class="row" style="justify-content:flex-end;padding:8px 10px">
+<button onclick="dPrev.close()">閉じる</button></div>
+</dialog>
+
+<script>
+// 通信は Flask ではなく Kotlin 側の App ブリッジ（MainActivity.Bridge）を使う。
+// 画面の組み立て（render など）は Web 版と同じ。
+let ITEMS={},VIEW='item';
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,
+  c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pct=(d,t)=>t>0?(d/t*100)+'%':'0%';
+
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+  t.classList.add('on'); VIEW=t.dataset.v; render();});
+
+function render(){
+  const list=Object.values(ITEMS);
+  if(VIEW==='item'){
+    list.sort((a,b)=>b.count-a.count);
+    $('#view').innerHTML='<table><thead><tr><th>商品</th><th class="cnt">店舗</th></tr></thead><tbody>'+
+      list.map(r=>`<tr><td>
+        <a href="https://shopping.bookoff.co.jp/used/${esc(r.pid)}">${esc(r.name)}</a>
+        ${r.count?`<div class="shops">${r.shops.map(s=>`<a href="${esc(s.url)}">${esc(s.name)}</a>`).join(' ・ ')}</div>`:''}
+        ${r.error?`<div class="err">${esc(r.error)}</div>`:''}
+        </td><td class="cnt mono ${r.count?'':'z'}">${r.count}</td></tr>`).join('')+
+      '</tbody></table>';
+  }else{
+    const by={};
+    list.forEach(r=>r.shops.forEach(s=>{(by[s.name]=by[s.name]||{url:s.url,items:[]}).items.push(r)}));
+    const keys=Object.keys(by).sort((a,b)=>by[b].items.length-by[a].items.length);
+    $('#view').innerHTML='<table><thead><tr><th>店舗</th><th class="cnt">点数</th></tr></thead><tbody>'+
+      keys.map(k=>`<tr><td><a href="${esc(by[k].url)}">${esc(k)}</a>
+        <div class="shops">${by[k].items.map(r=>esc(r.name)).join(' ・ ')}</div></td>
+        <td class="cnt mono">${by[k].items.length}</td></tr>`).join('')+'</tbody></table>';
+  }
+}
+
+function setRunning(on){
+  $('#bRun').disabled=on; $('#bStop').disabled=!on;
+  $('#bar').classList.toggle('on',on);
+}
+
+// 画面を離れている間の進捗はサービス側で進むので、戻ったら状態を取り直す
+function sync(){
+  const d=JSON.parse(App.getState());
+  ITEMS={}; d.items.forEach(i=>ITEMS[i.pid]=i); render();
+  $('#bar div').style.width=pct(d.done,d.total);
+  setRunning(d.running);
+  if(d.running)      $('#stat').textContent=`${d.done} / ${d.total}　並列 ${d.workers}`;
+  else if(d.total)   $('#stat').textContent=`完了 ${d.done}件`;
+  return d;
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)sync();});
+
+// Kotlin (Checker) からのイベント受け口
+window.__native=(kind,d)=>{
+  if(kind==='row'){
+    ITEMS[d.pid]={pid:d.pid,name:d.name,count:d.count,shops:d.shops,error:d.error};
+    render();
+    $('#bar div').style.width=pct(d.done,d.total);
+    $('#stat').textContent=`${d.done} / ${d.total}　並列 ${d.workers}`;
+  }else if(kind==='status'){
+    $('#stat').textContent=d.msg;
+  }else if(kind==='end'){
+    setRunning(false);
+    $('#stat').textContent=d.cancelled
+      ?`中止（${d.done}件）`
+      :`完了 ${d.done}件　在庫あり ${d.hits}件`;
+  }else if(kind==='mail'){
+    $('#mMsg').textContent=d.msg;
+  }
+};
+
+$('#bRun').onclick=()=>{setRunning(true);$('#stat').textContent='開始しています...';App.start();};
+$('#bStop').onclick=()=>{$('#bStop').disabled=true;
+  $('#stat').textContent='中止しています...';App.cancel();};
+$('#bCsv').onclick=()=>App.exportCsv();
+$('#bReset').onclick=()=>{
+  if(!App.reset()){$('#stat').textContent='実行中はリセットできません';return;}
+  ITEMS={};render();$('#stat').textContent='リセットしました';
+  $('#bar div').style.width='0%';};
+
+$('#bIds').onclick=()=>{
+  $('#idsBox').value=JSON.parse(App.getIds()).join('\n'); dIds.showModal();};
+$('#idsSave').onclick=()=>{
+  const ids=$('#idsBox').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  const r=JSON.parse(App.saveIds(JSON.stringify(ids)));
+  dIds.close();$('#stat').textContent=r.length+'件を保存しました';};
+
+$('#bMail').onclick=()=>{
+  const p=JSON.parse(App.getPrefectures());
+  const src=p.found.length?p.found:p.all;
+  $('#prefs').innerHTML=src.map(x=>`<span class="chip" data-p="${esc(x)}">${esc(x)}</span>`).join('');
+  $('#prefs').querySelectorAll('.chip').forEach(c=>c.onclick=()=>c.classList.toggle('on'));
+  const c=JSON.parse(App.getMailConfig());
+  $('#mFrom').value=c.from||'';$('#mTo').value=c.to||'';$('#mPw').value=c.password||'';
+  $('#mMsg').textContent='';
+  dMail.showModal();};
+const picked=()=>[...$('#prefs').querySelectorAll('.chip.on')].map(c=>c.dataset.p);
+function saveMail(){App.saveMailConfig(JSON.stringify(
+  {from:$('#mFrom').value,password:$('#mPw').value,to:$('#mTo').value}));}
+$('#mPrev').onclick=()=>{saveMail();
+  $('#prevFrame').srcdoc=App.mailPreview(JSON.stringify(picked()));
+  dPrev.showModal();};
+$('#mSend').onclick=()=>{saveMail();$('#mMsg').textContent='送信中...';
+  App.sendMail(JSON.stringify(picked()));};
+
+sync();
+</script></body></html>

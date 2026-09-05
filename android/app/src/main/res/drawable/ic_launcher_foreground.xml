@@ -1,0 +1,19 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 本の背表紙を模した図形 -->
+    <path
+        android:fillColor="#E0A458"
+        android:pathData="M34,30 L52,30 L52,78 L34,78 Z" />
+    <path
+        android:fillColor="#C8553D"
+        android:pathData="M56,30 L74,30 L74,78 L56,78 Z" />
+    <path
+        android:fillColor="#16110D"
+        android:pathData="M37,36 L49,36 L49,40 L37,40 Z" />
+    <path
+        android:fillColor="#16110D"
+        android:pathData="M59,36 L71,36 L71,40 L59,40 Z" />
+</vector>
