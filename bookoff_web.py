@@ -500,12 +500,23 @@ def api_ids_save():
 
 @app.get("/api/update_ids")
 def api_update_ids():
-    """ブックマークレットからの GET リダイレクト用（CORS回避）。"""
+    """ブックマークレットからの GET リダイレクト用（CORS回避）。
+
+    mode=add で既存の一覧に追記する。お気に入りをページごとに取り込むとき
+    上書きだと前のページ分が消えてしまう。
+    """
     raw = request.args.get("ids", "")
-    ids = save_ids(re.split(r"[,\s|]+", raw))
+    incoming = re.split(r"[,\s|]+", raw)
+    if request.args.get("mode") == "add":
+        before = load_ids()
+        ids = save_ids(before + incoming)
+        note = f"新規{len(ids) - len(before)}件を追加（合計{len(ids)}件）"
+    else:
+        ids = save_ids(incoming)
+        note = f"{len(ids)}件を保存しました"
     return Response(
         f"<meta charset='utf-8'><body style='background:#16110d;color:#e0a458;"
-        f"font-family:sans-serif;padding:40px'>{len(ids)}件を保存しました。"
+        f"font-family:sans-serif;padding:40px'>{html_mod.escape(note)}。"
         f"このタブは閉じて構いません。</body>",
         mimetype="text/html; charset=utf-8")
 
@@ -723,6 +734,11 @@ cursor:pointer;color:var(--dim)}
 <dialog id="dIds">
 <div style="font-weight:600">商品ID（1行1件）</div>
 <textarea id="idsBox"></textarea>
+<label>お気に入りから取り込む</label>
+<div style="color:var(--dim);font-size:11px;line-height:1.6">
+下の1行をブックマークとして登録し、ログイン済みのお気に入りページで実行すると、
+そのページの商品IDが<b>追記</b>されます。ページを送りながら繰り返せます。</div>
+<textarea id="bmBox" readonly style="height:70px;font-size:11px;margin-top:5px"></textarea>
 <div class="row" style="justify-content:flex-end;margin-top:10px">
 <button onclick="dIds.close()">閉じる</button><button class="go" id="idsSave">保存</button></div>
 </dialog>
@@ -819,9 +835,13 @@ $('#bReset').onclick=async()=>{
   ITEMS={};render();$('#stat').textContent='リセットしました';
   $('#bar div').style.width='0%';};
 
+const BM="javascript:(function(){var s=[],k={},h=document.documentElement.innerHTML,"
+  +"re=/\\/used\\/(\\d{8,12})/g,m;while((m=re.exec(h))!==null){if(!k[m[1]]){k[m[1]]=1;s.push(m[1]);}}"
+  +"if(!s.length){alert('\u5546\u54c1ID\u304c\u898b\u3064\u304b\u308a\u307e\u305b\u3093');return;}"
+  +"location.href='"+location.origin+"/api/update_ids?mode=add&ids='+s.join(',');})()";
 $('#bIds').onclick=async()=>{
   const ids=await(await fetch('/api/ids')).json();
-  $('#idsBox').value=ids.join('\n'); dIds.showModal();};
+  $('#idsBox').value=ids.join('\n'); $('#bmBox').value=BM; dIds.showModal();};
 $('#idsSave').onclick=async()=>{
   const ids=$('#idsBox').value.split('\n').map(s=>s.trim()).filter(Boolean);
   const r=await(await fetch('/api/ids',{method:'POST',

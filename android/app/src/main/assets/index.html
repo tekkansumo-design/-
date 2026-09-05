@@ -55,6 +55,7 @@ cursor:pointer;color:var(--dim)}
 <button class="go" id="bRun">チェック開始</button>
 <button class="stop" id="bStop" disabled>中止</button>
 <button id="bIds">商品ID</button>
+<button id="bImport">取込</button>
 <button id="bMail">メール</button>
 <button id="bCsv">CSV</button>
 <button id="bReset">リセット</button>
@@ -167,6 +168,7 @@ window.__native=(kind,d)=>{
 $('#bRun').onclick=()=>{setRunning(true);$('#stat').textContent='開始しています...';App.start();};
 $('#bStop').onclick=()=>{$('#bStop').disabled=true;
   $('#stat').textContent='中止しています...';App.cancel();};
+$('#bImport').onclick=()=>App.openImport();
 $('#bCsv').onclick=()=>App.exportCsv();
 $('#bReset').onclick=()=>{
   if(!App.reset()){$('#stat').textContent='実行中はリセットできません';return;}

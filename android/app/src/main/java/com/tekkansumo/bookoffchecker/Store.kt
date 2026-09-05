@@ -41,6 +41,18 @@ object Store {
         return out
     }
 
+    /**
+     * 既存の一覧に追加する。お気に入りをページごとに取り込むので、
+     * saveIds の上書きではなく追記でないと前のページ分が消える。
+     * 戻り値は (新しく増えた件数, 合計件数)。
+     */
+    fun addIds(ctx: Context, incoming: List<String>): Pair<Int, Int> {
+        val cur = ids(ctx)
+        val merged = normalize(cur + incoming)
+        prefs(ctx).edit().putString(K_IDS, JSONArray(merged).toString()).apply()
+        return Pair(merged.size - cur.size, merged.size)
+    }
+
     fun mailConfig(ctx: Context): JSONObject {
         val raw = prefs(ctx).getString(K_MAIL, null)
         val o = try {

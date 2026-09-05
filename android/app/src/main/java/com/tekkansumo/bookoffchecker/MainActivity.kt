@@ -199,6 +199,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun openImport() {
+            runOnUiThread {
+                startActivity(Intent(this@MainActivity, ImportActivity::class.java))
+            }
+        }
+
+        @JavascriptInterface
         fun exportCsv() {
             runOnUiThread { shareCsv() }
         }

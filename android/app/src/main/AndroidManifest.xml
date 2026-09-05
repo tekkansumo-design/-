@@ -26,6 +26,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ImportActivity"
+            android:exported="false"
+            android:label="お気に入りから取り込む"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode" />
+
         <service
             android:name=".CheckService"
             android:exported="false"
