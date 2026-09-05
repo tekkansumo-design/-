@@ -45,6 +45,7 @@ a{color:var(--hit);text-decoration:none}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
 padding:11px 12px;margin:0 0 8px}
 .card.z{opacity:.5}
+.card.new{border-color:#6b5330;background:#221a12}
 .chead{display:flex;gap:10px;align-items:flex-start}
 .ttl{flex:1;font-size:15px;font-weight:700;line-height:1.45;word-break:break-word}
 .badge{flex:none;font-size:12px;font-weight:700;color:var(--hit);background:#2b2118;
@@ -167,6 +168,20 @@ const PREFS=['北海道','青森','岩手','宮城','秋田','山形','福島','
 '山口','徳島','香川','愛媛','高知','福岡','佐賀','長崎','熊本','大分','宮崎','鹿児島','沖縄'];
 
 let ITEMS={},VIEW='item',ONLY_HIT=true,Q='',RUNNING=false;
+const NEW={};                 // pid -> 届いた時刻。少しの間カードを光らせる
+const NEW_MS=1500;
+let RENDER_REQ=false,NEW_TIMER=null;
+const raf=cb=>(typeof requestAnimationFrame==='function'
+  ?requestAnimationFrame(cb):setTimeout(cb,16));
+
+// 並列で回すと行がまとめて届く。1件ごとに全カードを作り直すと重いので
+// 同じフレームぶんは 1 回にまとめる。
+function scheduleRender(){
+  if(RENDER_REQ) return;
+  RENDER_REQ=true;
+  raf(()=>{RENDER_REQ=false;render();});
+}
+const isNew=pid=>Date.now()-(NEW[pid]||0)<NEW_MS;
 let DONE=0,TOTAL=0,WORKERS=0;
 let T0=0,D0=0,TICK=null;      // 速度と残り時間の計算用
 
@@ -252,7 +267,7 @@ function cardItem(r){
   // 絞り込みで店舗を減らしたときは「2/5店」と出して隠れている数を示す
   const label=!r.count?'なし'
     :(shops.length<r.count?`${shops.length}/${r.count}店`:`${r.count}店`);
-  return `<div class="card${r.count?'':' z'}">
+  return `<div class="card${r.count?'':' z'}${isNew(r.pid)?' new':''}">
     <div class="chead">
       <div class="ttl"><a href="${PROD}${esc(r.pid)}"${LT}>${esc(r.name)}</a></div>
       <div class="badge${r.count?'':' z'}">${label}</div>
@@ -293,7 +308,9 @@ function render(){
     html=keys.length?keys.map(k=>cardShop(k,by[k])).join('')
                     :`<div class="empty">在庫のある店舗はまだありません</div>`;
   }
+  const y=(typeof window!=='undefined'&&window.scrollY)||0;
   $('#view').innerHTML=html;
+  if(y&&window.scrollY!==y) window.scrollTo(0,y);
   summary();
 }
 
@@ -310,12 +327,20 @@ function setRunning(on){
 }
 function markStart(){T0=Date.now();D0=DONE;}
 
+const cut=(s,n)=>{s=String(s||'');return s.length>n?s.slice(0,n)+'…':s;};
+
 function applyRow(d){
   ITEMS[d.pid]={pid:d.pid,name:d.name,count:d.count,shops:d.shops,error:d.error};
+  if(d.count) NEW[d.pid]=Date.now();      // 在庫ありのカードだけ光らせる
   DONE=d.done; TOTAL=d.total; WORKERS=d.workers;
   $('#bar div').style.width=pct(DONE,TOTAL);
-  $('#stat').textContent=`${DONE} / ${TOTAL} 件を確認`;
-  render();
+  // 「在庫ありのみ」だと在庫なしが続く間カードが増えないので、
+  // 直前に確認した商品名を出して動いていることを見せる
+  $('#stat').textContent=`${DONE} / ${TOTAL}　${cut(d.name,26)}`;
+  scheduleRender();
+  // ハイライトを消すための再描画を予約する
+  if(NEW_TIMER) clearTimeout(NEW_TIMER);
+  NEW_TIMER=setTimeout(()=>{NEW_TIMER=null;render();},NEW_MS+100);
 }
 
 // トランスポート（Web は SSE、アプリは Kotlin）から呼ばれる共通の受け口
