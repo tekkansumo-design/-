@@ -4,6 +4,9 @@ on:
   push:
     paths:
       - 'android/**'
+      # 画面の生成元と生成スクリプト。ここを変えても APK に影響する
+      - 'bookoff_web.py'
+      - 'tools/**'
       - '.github/workflows/android.yml'
   workflow_dispatch:
 
