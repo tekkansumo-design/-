@@ -4,13 +4,13 @@
 BOOKOFF 在庫店舗チェッカー Web版
 
 使い方:
-  pip install flask requests beautifulsoup4
+  pip install flask requests
   python bookoff_web.py
   → ブラウザで http://localhost:5000 を開く
 
 Android(Termux):
   pkg install python
-  pip install flask requests beautifulsoup4
+  pip install flask requests
   python bookoff_web.py
   → http://127.0.0.1:5000
 """
@@ -29,11 +29,11 @@ import traceback
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 import requests
-from bs4 import BeautifulSoup
 from flask import Flask, Response, abort, jsonify, request
 
 # ═══════════════════════════════════════════════
@@ -228,11 +228,87 @@ def _sleep(sec):
     return CANCEL.wait(sec)
 
 
-def parse_shops(base_url, soup):
-    """商品ページ HTML から在庫店舗リンクを抜く。相対 URL にも対応。"""
+class PageScan(HTMLParser):
+    """商品ページから h1 と <a href> を拾うだけの軽量パーサ。
+
+    bs4 も "html.parser"（＝この標準パーサ）を使っていたので解析能力は同等。
+    依存を減らすため直接使う（Pydroid 3 で pip するのが flask と requests
+    だけで済む）。
+    """
+
+    SKIP = {"script", "style"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self._links = []         # [[href, [text片, ...]], ...] 出現順
+        self._open = []          # 開いている <a> の _links 上の位置（None=href無し）
+        self.h1 = None
+        self._h1_depth = 0
+        self._h1_buf = []
+        self._skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.SKIP:
+            self._skip += 1
+        elif tag == "a":
+            href = dict(attrs).get("href")
+            if href:
+                self._links.append([href, []])
+                self._open.append(len(self._links) - 1)
+            else:
+                self._open.append(None)
+        elif tag == "h1":
+            self._h1_depth += 1
+
+    def handle_endtag(self, tag):
+        if tag in self.SKIP:
+            self._skip = max(0, self._skip - 1)
+        elif tag == "a":
+            if self._open:
+                self._open.pop()
+        elif tag == "h1" and self._h1_depth:
+            self._h1_depth -= 1
+            if self._h1_depth == 0 and self.h1 is None:
+                self.h1 = norm_text("".join(self._h1_buf))
+
+    def handle_data(self, data):
+        if self._skip:
+            return
+        if self._open and self._open[-1] is not None:
+            self._links[self._open[-1]][1].append(data)
+        if self._h1_depth:
+            self._h1_buf.append(data)
+
+    def close(self):
+        super().close()
+        if self.h1 is None and self._h1_buf:   # </h1> 閉じ忘れでも拾う
+            self.h1 = norm_text("".join(self._h1_buf))
+
+    @property
+    def links(self):
+        return [(href, norm_text("".join(buf))) for href, buf in self._links]
+
+
+def norm_text(s):
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def scan_page(html_text):
+    """HTML から (h1, [(href, text), ...]) を返す。"""
+    p = PageScan()
+    try:
+        p.feed(html_text)
+    except Exception:
+        pass                        # 壊れた HTML でもそこまでの結果を使う
+    p.close()
+    return p.h1, p.links
+
+
+def parse_shops(base_url, links):
+    """リンク一覧から在庫店舗を抜く。相対 URL にも対応。"""
     shops, seen = [], set()
-    for a in soup.find_all("a", href=True):
-        href = urljoin(base_url, a["href"].strip())
+    for raw_href, text in links:
+        href = urljoin(base_url, raw_href.strip())
         u = urlparse(href)
         if u.scheme not in ("http", "https"):
             continue
@@ -240,7 +316,6 @@ def parse_shops(base_url, soup):
             continue
         if not SHOP_PATH_RE.search(u.path):
             continue          # 「店舗検索」など実店舗でないリンクを除外
-        text = a.get_text(strip=True)
         if not text or text == "店舗検索":
             continue
         key = f"{u.netloc}{u.path}"
@@ -284,12 +359,9 @@ def fetch_stores(sess: Session, pid: str):
             continue
 
         sess.on_ok()
-        soup = BeautifulSoup(r.text, "html.parser")
-
-        h1 = soup.find("h1")
-        name = h1.get_text(strip=True) if h1 else pid
-
-        return {"name": name, "shops": parse_shops(url, soup), "error": None}
+        h1, links = scan_page(r.text)
+        return {"name": h1 or pid, "shops": parse_shops(url, links),
+                "error": None}
 
     return {"name": pid, "shops": [], "error": "cancelled"}
 
@@ -564,18 +636,17 @@ def api_mail_send():
 def debug(pid):
     s = Session()
     r = s.s.get(f"https://shopping.bookoff.co.jp/used/{pid}", timeout=25)
-    soup = BeautifulSoup(r.text, "html.parser")
-    h1 = soup.find("h1")
+    h1, links = scan_page(r.text)
     url = f"https://shopping.bookoff.co.jp/used/{pid}"
     out = [f"HTTP {r.status_code} / {len(r.text)} bytes",
-           "h1: " + (h1.get_text(strip=True) if h1 else "-"),
+           "h1: " + (h1 or "-"),
            "--- 抽出された店舗 ---"]
-    for sh in parse_shops(url, soup):
+    for sh in parse_shops(url, links):
         out.append(f'{sh["name"]} -> {sh["url"]}')
     out.append("--- shop を含む全リンク ---")
-    for a in soup.find_all("a", href=True):
-        if "shop" in a["href"]:
-            out.append(f'{a.get_text(strip=True)[:40]!r} -> {a["href"][:90]}')
+    for href, text in links:
+        if "shop" in href:
+            out.append(f'{text[:40]!r} -> {href[:90]}')
     out += ["", "--- raw html ---", r.text]
     return Response("\n".join(out), mimetype="text/plain; charset=utf-8")
 
