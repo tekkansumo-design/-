@@ -33,20 +33,42 @@ class DiagnoseActivity : AppCompatActivity() {
     companion object {
         private const val JS = """
         (function(){
-          var out={title:'',h1:'',links:0,shop:[],len:0};
+          var out={title:'',h1:'',len:0,links:[],kw:[],apis:[]};
           out.title=document.title||'';
           var h=document.querySelector('h1');
           out.h1=h?(h.innerText||h.textContent||'').replace(/\s+/g,' ').trim():'';
+          out.len=document.documentElement.innerHTML.length;
+
+          // ページ上の全リンク。どんな URL の形なのかを見る
           var as=document.querySelectorAll('a[href]');
-          out.links=as.length;
           for(var i=0;i<as.length;i++){
-            var raw=as[i].getAttribute('href')||'';
-            if(/\/shop\/shop\d+/i.test(raw)||/\/shop\/shop\d+/i.test(as[i].href||'')){
-              var t=(as[i].textContent||'').replace(/\s+/g,' ').trim();
-              out.shop.push(t.slice(0,40)+'  ->  '+raw.slice(0,70));
+            var t=(as[i].textContent||'').replace(/\s+/g,' ').trim().slice(0,22);
+            out.links.push(t+' | '+(as[i].getAttribute('href')||'').slice(0,72));
+          }
+
+          // 「店舗」「在庫」を含む末端要素。在庫欄がどこにあるか探す
+          var all=document.querySelectorAll('body *');
+          for(var i=0;i<all.length&&out.kw.length<30;i++){
+            var e=all[i];
+            if(e.children&&e.children.length) continue;
+            var t=(e.textContent||'').replace(/\s+/g,' ').trim();
+            if(!t||t.length>60) continue;
+            if(/店舗|在庫/.test(t)){
+              var c=String(e.className||'').slice(0,26);
+              out.kw.push(e.tagName.toLowerCase()+(c?'.'+c:'')+' : '+t);
             }
           }
-          out.len=document.documentElement.innerHTML.length;
+
+          // ソース中の API っぽいパス。在庫が別取得ならここに出る
+          var src=document.documentElement.innerHTML;
+          // クエリ付き（?goods=... など）も拾えるように区切りは引用符だけにする
+          var m=src.match(/["']([^"'\s]{0,160}(?:stock|shop|tenpo|api|inventory)[^"'\s]{0,160})["']/gi)||[];
+          var seen={};
+          for(var i=0;i<m.length&&out.apis.length<30;i++){
+            var u=m[i].slice(1,-1);
+            if(u.indexOf('/')<0) continue;      // 単語だけのものは除く
+            if(seen[u]) continue; seen[u]=1; out.apis.push(u);
+          }
           return JSON.stringify(out);
         })()
         """
@@ -117,7 +139,7 @@ class DiagnoseActivity : AppCompatActivity() {
         root.addView(run, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         root.addView(ScrollView(this).apply { addView(report) },
             LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
-        root.addView(web, LinearLayout.LayoutParams(MATCH_PARENT, 260))
+        root.addView(web, LinearLayout.LayoutParams(MATCH_PARENT, 700))
         root.addView(share, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         setContentView(root)
     }
@@ -130,6 +152,13 @@ class DiagnoseActivity : AppCompatActivity() {
     private fun log(s: String) {
         sb.append(s).append('\n')
         runOnUiThread { report.text = sb.toString() }
+    }
+
+    private fun countOf(s: String, kw: String): Int {
+        var n = 0
+        var i = s.indexOf(kw)
+        while (i >= 0) { n++; i = s.indexOf(kw, i + 1) }
+        return n
     }
 
     private fun pid() = input.text.toString().filter { it.isDigit() }.padStart(10, '0')
@@ -157,7 +186,10 @@ class DiagnoseActivity : AppCompatActivity() {
                         log("抽出できた在庫店舗: ${shops.size} 件")
                         shops.take(10).forEach { log("  ${it.name}  ->  ${it.url}") }
                         if (shops.isEmpty()) {
-                            log("  ※ 0 件。ここが原因の可能性が高い")
+                            log("  ※ 0 件。/shop/shopNNN 以外の形を探す:")
+                            for (kw in listOf("店舗在庫", "店舗", "在庫", "stock", "shop")) {
+                                log("    \"$kw\" の出現数: ${countOf(body, kw)}")
+                            }
                         }
                     }
                 }
@@ -176,25 +208,37 @@ class DiagnoseActivity : AppCompatActivity() {
             try {
                 val v = JSONTokener(raw).nextValue()
                 val o = JSONObject(v as String)
-                val shop = o.getJSONArray("shop")
-                log("[$label] title: ${o.optString("title").take(50)}")
-                log("[$label] h1: ${o.optString("h1").take(50)}")
-                log("[$label] HTML ${o.optInt("len")} 文字 / <a> ${o.optInt("links")} 個 "
-                        + "/ 店舗リンク ${shop.length()} 件")
-                for (i in 0 until minOf(shop.length(), 10)) log("    ${shop.getString(i)}")
+                log("[$label] title: ${o.optString("title").take(60)}")
+                log("[$label] h1: ${o.optString("h1").take(60)}")
+                log("[$label] HTML ${o.optInt("len")} 文字")
+
+                val links = o.getJSONArray("links")
+                log("[$label] ページ上のリンク ${links.length()} 件（全部出す）:")
+                for (i in 0 until links.length()) log("    ${links.getString(i)}")
+
+                val kw = o.getJSONArray("kw")
+                log("[$label] 「店舗」「在庫」を含む要素 ${kw.length()} 件:")
+                for (i in 0 until kw.length()) log("    ${kw.getString(i)}")
+
+                val apis = o.getJSONArray("apis")
+                log("[$label] stock/shop/api を含むパス ${apis.length()} 件:")
+                for (i in 0 until apis.length()) log("    ${apis.getString(i)}")
             } catch (e: Exception) {
-                log("[$label] 読み取り失敗: $raw")
+                log("[$label] 読み取り失敗: ${raw?.take(200)}")
             }
         }
     }
 
     private fun finishReport() {
         log("")
-        log("=== 結論の読み方 ===")
-        log("1 が 0 件で 2 が取れている → 在庫情報が JavaScript 描画。取得方法を変える")
-        log("1 も 2 も 0 件           → ページ構成が想定と違う。抽出条件を作り直す")
-        log("1 が取れている           → 取得は正常。表示側の問題")
+        log("=== ここまでで分かっていること ===")
+        log("商品名は取れているので通信と解析は動いている。")
+        log("在庫店舗が /shop/shopNNN のリンクとして置かれているという前提が誤り。")
+        log("上のリンク一覧と「店舗」「在庫」要素から正しい形を割り出す。")
         log("")
-        log("下の「結果を共有」でこの内容を送ってください。")
+        log("下の WebView は操作できます。ページを下までスクロールして、")
+        log("店舗在庫の欄があるか、あるなら押すと何が起きるかも見てください。")
+        log("")
+        log("「結果を共有」でこの内容を送ってください。")
     }
 }
