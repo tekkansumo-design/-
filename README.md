@@ -25,9 +25,10 @@ python3 tools/gen_android_asset.py
 
 を実行してコミットする（CI が食い違いを検出する）。
 
-## artist_cd_web.py — アーティストCDリスト × BOOKOFF オンライン
+## artist_cd_web.py / android:cdlist — アーティストCDリスト × BOOKOFF オンライン
 
-アーティスト名から CD の一覧を作り、表にして見せる。
+アーティスト名から CD の一覧を作り、表にして見せる。**Android アプリ版（`CDリスト`）と
+PC 版がある**。画面は共通で、リリースの `cd-list-*.apk` がアプリ版。
 
 ```
 python artist_cd_web.py   → http://127.0.0.1:5001
@@ -47,6 +48,22 @@ python artist_cd_web.py   → http://127.0.0.1:5001
   うまく当たらないときは検索名の欄を直す。
 - 在庫が取れなくなったら「診断」。どの検索URLの形が生きているか、商品リンクを
   拾えているか、生の HTML までそのまま出す。
+
+### アプリ版（android/cdlist）
+
+画面は `artist_cd_web.py` の `UI_HTML` / `UI_JS` から生成する（`tools/gen_android_asset.py`）。
+通信だけが違い、Flask の代わりに Kotlin の `MainActivity.Bridge` が受ける。
+
+| 役割 | ファイル |
+|---|---|
+| 検索結果の読み取り・突き合わせ | `Bookoff.kt` / `Match.kt` |
+| 作品一覧（MusicBrainz） | `MusicBrainz.kt` |
+| 所有の控え | `Store.kt`（`artist_cd_owned.json`） |
+| 照会の進行と並列の加減 | `Checker.kt`（`Gate`） |
+
+読み取りまわりは素の JVM で回せる形にしてあり、CI が
+`./gradlew :cdlist:testDebugUnitTest` で毎回確かめる。相手のページを叩かずに
+作り物の HTML で確かめられるので、サイトの作りが変わったときも切り分けが早い。
 
 保存ファイル（`bookoff_ids.json` / `artist_cd_owned.json` など）は
 `.gitignore` 済み。

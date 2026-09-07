@@ -6,6 +6,7 @@ on:
       - 'android/**'
       # 画面の生成元と生成スクリプト。ここを変えても APK に影響する
       - 'bookoff_web.py'
+      - 'artist_cd_web.py'
       - 'tools/**'
       - '.github/workflows/android.yml'
   workflow_dispatch:
@@ -42,6 +43,10 @@ jobs:
           key: gradle-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-
 
+      - name: Test CDリストの読み取り
+        working-directory: android
+        run: ./gradlew --no-daemon :cdlist:testDebugUnitTest
+
       - name: Build debug APK
         working-directory: android
         run: ./gradlew --no-daemon assembleDebug
@@ -51,6 +56,8 @@ jobs:
           mkdir -p out
           cp android/app/build/outputs/apk/debug/app-debug.apk \
              "out/bookoff-checker-${GITHUB_RUN_NUMBER}.apk"
+          cp android/cdlist/build/outputs/apk/debug/cdlist-debug.apk \
+             "out/cd-list-${GITHUB_RUN_NUMBER}.apk"
           ls -la out
 
       - name: Upload artifact
@@ -63,9 +70,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: apk-${{ github.run_number }}
-          name: BOOKOFF 在庫チェッカー build ${{ github.run_number }}
+          name: build ${{ github.run_number }}
           body: |
             スマホのブラウザでこのページを開き、下の .apk をタップするとインストールできます。
             「提供元不明のアプリ」の許可を求められたら許可してください。
+
+            - `bookoff-checker-*.apk` … BOOKOFF 在庫店舗チェッカー
+            - `cd-list-*.apk` … アーティストCDリスト（所有チェック＋BOOKOFFオンラインの在庫と価格）
           files: out/*.apk
           generate_release_notes: false

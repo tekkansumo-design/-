@@ -774,7 +774,11 @@ def diag():
 
 
 # ═══════════════════════════════════════════════
-#  画面
+#  画面（Web 版とアプリ版で共有）
+#
+#  UI_HTML と UI_JS は共通。通信部分だけを T（トランスポート）に閉じ込め、
+#  Web 版は WEB_JS、Android 版は tools/gen_android_asset.py の APP_JS で
+#  差し替える。画面を直したいときはこのファイルだけを編集する。
 # ═══════════════════════════════════════════════
 UI_HTML = r"""<!doctype html><html lang="ja"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -913,6 +917,9 @@ UI_JS = r"""
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,
   c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const IN_APP=!!window.App;
+// アプリ内では新規タブが開けないので同一画面で遷移させ、Kotlin 側が外部ブラウザに渡す
+const LT=IN_APP?'':' target="_blank" rel="noopener"';
 const KIND={album:'アルバム',single:'シングル',ep:'EP',other:'その他'};
 const KORD={album:0,single:1,ep:2,other:3};
 const SORD={stock:0,sold:1,none:2,error:3};
@@ -920,7 +927,7 @@ const SORD={stock:0,sold:1,none:2,error:3};
 let ART=null;          // 選んだアーティスト {id,name}
 let ROWS=[];           // 作品一覧
 let ST={};             // rgid -> 在庫チェック結果
-let RUNNING=false, ES=null, TIMER=null;
+let RUNNING=false, TIMER=null;
 let SORT={k:'date',d:-1};
 
 const yen=n=>n==null?'':'¥'+Number(n).toLocaleString('ja-JP');
@@ -975,12 +982,11 @@ function stockCell(r){
 }
 function boCell(r){
   const s=ST[r.id]; if(!s) return '';
-  if(s.url) return '<a href="'+esc(s.url)+'" target="_blank" rel="noopener">'+
+  if(s.url) return '<a href="'+esc(s.url)+'"'+LT+'>'+
     esc(s.name||'商品ページ')+'</a>'+(s.new?'<span class="nw">新品</span>':'')+
     (s.hits>1?'<span class="nw" style="color:var(--dim);border-color:var(--line)">他'+
       (s.hits-1)+'件</span>':'');
-  if(s.search) return '<a href="'+esc(s.search)+
-    '" target="_blank" rel="noopener">検索結果を見る</a>';
+  if(s.search) return '<a href="'+esc(s.search)+'"'+LT+'>検索結果を見る</a>';
   return '';
 }
 function rowHtml(r){
@@ -1056,7 +1062,7 @@ async function findArtist(){
   if(!q) return;
   $('#cands').innerHTML=''; setStat('アーティストを探しています…');
   try{
-    const d=await (await fetch('/api/artists?q='+encodeURIComponent(q))).json();
+    const d=await T.artists(q);
     if(!d.ok){ setStat('× '+d.msg); return; }
     if(!d.artists.length){ setStat('見つかりませんでした'); return; }
     $('#cands').innerHTML=d.artists.map((a,i)=>
@@ -1077,7 +1083,7 @@ async function loadDisco(mbid,name,chip){
   setStat(name+' の作品一覧を読み込んでいます…');
   $('#bRun').disabled=true;
   try{
-    const d=await (await fetch('/api/discography?mbid='+encodeURIComponent(mbid))).json();
+    const d=await T.disco(mbid);
     if(!d.ok){ setStat('× '+d.msg); return; }
     ROWS=d.items; ST={};
     setStat(name+'：'+ROWS.length+'件の作品を読み込みました');
@@ -1094,10 +1100,8 @@ async function toggleOwn(id,owned){
   if(tr) tr.classList.toggle('own',owned);
   summary();
   try{
-    const res=await (await fetch('/api/owned',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({id:id,owned:owned,meta:{
-        title:r.title,artist:ART?ART.name:'',kind:r.kind,date:r.date}})})).json();
+    const res=await T.setOwned(id,owned,
+      {title:r.title,artist:ART?ART.name:'',kind:r.kind,date:r.date});
     toast(owned?'保存しました（所有 '+res.count+'件）':'外しました（所有 '+res.count+'件）');
   }catch(e){ toast('× 保存できませんでした'); r.owned=!owned; render(); }
   if(filters().own!=='all') schedule();
@@ -1111,34 +1115,34 @@ async function startCheck(){
   if(!targets.length){ setStat('照会する作品がありません（未照会のみを外すと再照会できます）'); return; }
   if(targets.length>60&&!confirm(targets.length+'件を BOOKOFF に照会します。\n'+
      '相手のサイトに負担をかけないよう間隔を空けるので時間がかかります。よろしいですか？')) return;
-  const plan=await (await fetch('/api/plan',{method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({artist:($('#bkName').value.trim()||ART.name),
-      items:targets.map(r=>({id:r.id,title:r.title}))})})).json();
+  const plan=await T.plan($('#bkName').value.trim()||ART.name,
+    targets.map(r=>({id:r.id,title:r.title})));
   if(!plan.ok){ setStat('× '+plan.msg); return; }
   targets.forEach(r=>{ ST[r.id]={state:'checking'}; patch(r.id); });
   RUNNING=true; $('#bRun').disabled=true; $('#bStop').disabled=false;
   $('#bar').classList.add('on'); $('#bar div').style.width='0%';
-  ES=new EventSource('/run');
-  ES.addEventListener('status',e=>setStat(JSON.parse(e.data).msg));
-  ES.addEventListener('progress',e=>{
-    const d=JSON.parse(e.data);
+  T.start();
+}
+/* 実行中の知らせ。Web は SSE、アプリは Kotlin からここへ入る */
+function __event(kind,d){
+  if(kind==='status') setStat(d.msg);
+  else if(kind==='progress'){
     $('#bar div').style.width=(d.total?d.done/d.total*100:0)+'%';
     setStat(d.done+' / '+d.total+' 件（並列 '+d.workers+'）');
-  });
-  ES.addEventListener('row',e=>{ const d=JSON.parse(e.data); ST[d.id]=d; patch(d.id); });
-  ES.addEventListener('end',e=>{ stopUi(); render(); });
-  ES.onerror=()=>{ if(RUNNING) setStat('接続が切れました'); stopUi(); };
+  }
+  else if(kind==='row'){ ST[d.id]=d; patch(d.id); }
+  else if(kind==='end'){ stopUi(); render(); }
+  else if(kind==='lost'){ if(RUNNING) setStat('接続が切れました'); stopUi(); }
 }
 function stopUi(){
   RUNNING=false;
-  if(ES){ ES.close(); ES=null; }
+  T.stopStream();
   $('#bRun').disabled=!ART; $('#bStop').disabled=true;
   $('#bar').classList.remove('on');
   Object.keys(ST).forEach(k=>{ if(ST[k].state==='checking') delete ST[k]; });
 }
 async function stopCheck(){
-  await fetch('/api/cancel',{method:'POST'});
+  await T.cancel();
   setStat('中止しています…');
 }
 
@@ -1153,12 +1157,7 @@ function csv(){
     lines.push([r.owned?'○':'',KIND[r.kind],r.title,r.sub||'',r.date||'',st,
                 s.price!=null?s.price:'',s.name||'',s.url||''].map(q).join(','));
   });
-  const blob=new Blob(['﻿'+lines.join('\r\n')],
-    {type:'text/csv;charset=utf-8'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download=(ART?ART.name:'cd')+'_bookoff.csv';
-  a.click(); URL.revokeObjectURL(a.href);
+  T.csv(lines.join('\r\n'),(ART?ART.name:'cd')+'_bookoff.csv');
 }
 
 /* ── 配線 ────────────────────────────────── */
@@ -1190,12 +1189,41 @@ $('#q').addEventListener('input',schedule);
 $('#bRun').onclick=startCheck;
 $('#bStop').onclick=stopCheck;
 $('#bCsv').onclick=csv;
-$('#bDiag').onclick=()=>window.open('/diag?kw='+encodeURIComponent(
-  ($('#bkName').value.trim()+' '+(ROWS[0]?ROWS[0].title:'')).trim()),'_blank');
+$('#bDiag').onclick=()=>T.diag(
+  ($('#bkName').value.trim()+' '+(ROWS[0]?ROWS[0].title:'')).trim());
 render();
 """
 
-PAGE = UI_HTML + "\n<script>\n" + UI_JS + "\n</script></body></html>\n"
+# Web 版の通信。Flask の API と SSE を叩く。
+WEB_JS = r"""
+let ES=null;
+const _post=async(u,o)=>(await fetch(u,{method:'POST',
+  headers:{'Content-Type':'application/json'},body:JSON.stringify(o)})).json();
+const T={
+  artists:async q=>(await fetch('/api/artists?q='+encodeURIComponent(q))).json(),
+  disco:async mbid=>(await fetch('/api/discography?mbid='+
+    encodeURIComponent(mbid))).json(),
+  setOwned:(id,owned,meta)=>_post('/api/owned',{id:id,owned:owned,meta:meta}),
+  plan:(artist,items)=>_post('/api/plan',{artist:artist,items:items}),
+  start(){
+    ES=new EventSource('/run');
+    ['status','progress','row','end'].forEach(k=>
+      ES.addEventListener(k,e=>__event(k,JSON.parse(e.data))));
+    ES.onerror=()=>__event('lost',{});
+  },
+  stopStream(){ if(ES){ ES.close(); ES=null; } },
+  cancel:async()=>fetch('/api/cancel',{method:'POST'}),
+  diag:kw=>window.open('/diag?kw='+encodeURIComponent(kw),'_blank'),
+  csv(text,name){
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob(['\ufeff'+text],
+      {type:'text/csv;charset=utf-8'}));
+    a.download=name; a.click(); URL.revokeObjectURL(a.href);
+  }
+};
+"""
+
+PAGE = UI_HTML + "\n<script>\n" + WEB_JS + "\n" + UI_JS + "\n</script></body></html>\n"
 
 if __name__ == "__main__":
     print(f"→ http://127.0.0.1:{PORT}   所有リスト: {OWNED_FILE}")
