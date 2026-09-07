@@ -1,0 +1,326 @@
+<!doctype html><html lang="ja"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>中古CD最安値サーチ</title>
+<style>
+:root{--bg:#0f1418;--panel:#151c22;--line:#233039;--ink:#e9eef2;--dim:#8fa3b0;
+--hit:#4fc3a1;--gold:#e8b84b;--warn:#e2685b;--chip:#1b242b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-size:14px;
+font-family:"Yu Gothic UI","Meiryo",system-ui,sans-serif;-webkit-text-size-adjust:100%}
+.mono{font-variant-numeric:tabular-nums}
+header{position:sticky;top:0;z-index:9;background:var(--panel);
+border-bottom:1px solid var(--line);padding:10px 12px 0}
+h1{font-size:13px;margin:0 0 8px;letter-spacing:.06em;font-weight:700;color:var(--hit)}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+input,select{background:#0b1013;color:var(--ink);border:1px solid var(--line);
+border-radius:6px;padding:8px 9px;font-size:13px;width:100%}
+button{background:var(--line);color:var(--ink);border:1px solid #2f3f4a;
+border-radius:6px;padding:8px 13px;font-size:13px;cursor:pointer;white-space:nowrap}
+button:hover{background:#2f3f4a}
+button.go{background:var(--hit);color:#06231b;border-color:var(--hit);font-weight:700}
+button.stop{background:var(--warn);color:#fff;border-color:var(--warn)}
+button:disabled{opacity:.4;cursor:default}
+.searchrow{display:flex;gap:6px}
+.searchrow .qwrap{flex:1;position:relative;display:flex}
+#kx{position:absolute;right:6px;top:50%;transform:translateY(-50%);cursor:pointer;
+color:var(--dim);font-size:16px;line-height:1;padding:2px 4px}
+#sites{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+.site{border:1px solid var(--line);border-radius:13px;padding:4px 11px;font-size:11.5px;
+cursor:pointer;color:var(--dim);background:var(--chip);user-select:none;
+display:flex;align-items:center;gap:5px}
+.site.on{color:var(--ink);border-color:#38566a}
+.site .dot{width:7px;height:7px;border-radius:50%;background:#3a4a55;flex:none}
+.site.on .dot{background:var(--hit)}
+.site.run .dot{background:var(--gold);animation:blink .9s infinite}
+.site.err .dot{background:var(--warn)}
+.site .n{color:var(--hit);font-weight:700}
+.site.err .n,.site.err{color:var(--warn)}
+@keyframes blink{50%{opacity:.25}}
+#bar{height:3px;background:var(--line);margin-top:9px;border-radius:2px;overflow:hidden}
+#bar div{height:100%;width:0;background:var(--hit);transition:width .3s}
+#stat{color:var(--dim);font-size:12px;margin-top:6px;line-height:1.6}
+#stat b{color:var(--gold)}
+.filt{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
+.filt .qwrap{flex:1;min-width:130px}
+.filt input{padding:6px 9px;font-size:12px}
+.sw{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--dim);
+white-space:nowrap;cursor:pointer;user-select:none}
+.sw input{width:auto;margin:0}
+.sw.on{color:var(--hit)}
+.cap{width:86px;flex:none}
+.tabs{display:flex;gap:4px;margin-top:9px}
+.tab{padding:6px 13px;border-radius:6px 6px 0 0;font-size:12px;cursor:pointer;
+color:var(--dim);border:1px solid transparent;border-bottom:none}
+.tab.on{background:var(--bg);color:var(--hit);border-color:var(--line)}
+main{padding:10px 12px 44px}
+a{color:var(--hit);text-decoration:none}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+padding:11px 12px;margin:0 0 8px}
+.chead{display:flex;gap:10px;align-items:flex-start}
+.thumb{width:52px;height:52px;flex:none;border-radius:6px;object-fit:cover;
+background:#0b1013;border:1px solid var(--line)}
+.ttl{flex:1;font-size:14.5px;font-weight:700;line-height:1.45;word-break:break-word}
+.price{flex:none;font-size:16px;font-weight:700;color:var(--gold);white-space:nowrap}
+.price small{font-size:11px;color:var(--dim);font-weight:400;display:block;text-align:right}
+.offers{margin-top:8px;display:flex;flex-direction:column;gap:4px}
+.of{display:flex;gap:8px;align-items:center;font-size:12px;padding:4px 8px;
+background:var(--chip);border:1px solid var(--line);border-radius:7px;cursor:pointer}
+.of:hover{border-color:#38566a}
+.of .sl{flex:none;color:var(--dim);width:62px;font-size:11px}
+.of .st{flex:1;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.of .sp{flex:none;color:var(--gold);font-weight:700}
+.of.best .sp{color:var(--hit)}
+.badge{font-size:10.5px;color:var(--dim);border:1px solid var(--line);
+border-radius:10px;padding:1px 7px;margin-left:6px;vertical-align:2px}
+.empty{color:var(--dim);font-size:13px;text-align:center;padding:44px 14px;line-height:1.9}
+.empty .big{font-size:15px;color:var(--ink);display:block;margin-bottom:6px}
+.note{color:var(--dim);font-size:11px;line-height:1.7;margin-top:10px}
+</style></head><body>
+<header>
+<h1>中古CD最安値サーチ</h1>
+<div class="searchrow">
+<div class="qwrap"><input id="kw" type="search" placeholder="アーティスト名・アルバム名"
+ enterkeyhint="search"><span id="kx" hidden>×</span></div>
+<button class="go" id="bRun">検索</button>
+<button class="stop" id="bStop" disabled>中止</button>
+</div>
+<div id="sites"></div>
+<div id="bar"><div></div></div>
+<div id="stat" class="mono">アーティスト名を入れて検索してください</div>
+<div class="filt">
+<div class="qwrap"><input type="text" id="q" placeholder="結果をしぼり込み"></div>
+<input class="cap mono" type="number" id="cap" placeholder="上限円" inputmode="numeric">
+</div>
+<div class="filt">
+<label class="sw on" id="swUsed"><input type="checkbox" id="onlyUsed" checked>中古のみ</label>
+<label class="sw on" id="swMatch"><input type="checkbox" id="onlyMatch" checked>キーワード一致</label>
+<span style="flex:1"></span>
+<button id="bDiag" style="padding:5px 10px;font-size:11px">診断</button>
+<button id="bCsv" style="padding:5px 10px;font-size:11px">CSV</button>
+</div>
+<div class="tabs">
+<div class="tab on" data-v="album">アルバム別の最安</div>
+<div class="tab" data-v="flat">全部を安い順</div>
+</div>
+</header>
+<main><div id="view"></div></main>
+
+<script>
+// 通信と解析は Kotlin 側（MainActivity.Bridge）。ここは入力と見せ方だけ。
+const T={
+  sites:()=>JSON.parse(App.getSites()),
+  state:()=>JSON.parse(App.getState()),
+  search:(w,ids)=>App.search(w,JSON.stringify(ids)),
+  cancel:()=>App.cancel(),
+  clear:()=>App.clear(),
+  open:u=>App.open(u),
+  diagnose:()=>App.openDiagnose(),
+  csv:()=>App.exportCsv()
+};
+
+let SITES=[], picked=new Set(), hits=[], states={}, view='album', running=false;
+
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const yen=n=>'¥'+Number(n).toLocaleString('ja-JP');
+
+// ── 題名の正規化 ────────────────────────────────
+// サイトごとに「【中古】」「(CD)」「帯付き」などの飾りが違うので、
+// それらを落としてから突き合わせないと同じ盤が別物として並ぶ。
+const NOISE=/中古|used|新品|未開封|美品|帯付き?|帯あり|特典|限定盤|通常盤|初回限定盤?|初回盤|完全生産限定|送料無料|レンタル落ち|ケース交換|紙ジャケ|リマスター|remaster|国内盤|輸入盤|盤面良好|disc|ディスク|アルバム|album|cd|dvd|blu\s*-?\s*ray|ブルーレイ/gi;
+
+// 記号は半角も全角も落とす。「First Love／宇多田ヒカル」と
+// 「【中古】First Love / 宇多田ヒカル」を同じ盤として扱うため。
+const PUNCT=/[!-\/:-@\[-`{-~\uFF01-\uFF0F\uFF1A-\uFF20\uFF3B-\uFF40\uFF5B-\uFF65\u3000-\u303F\u30FC\uFF70\s]+/g;
+
+function half(s){
+  return String(s||'').replace(/[Ａ-Ｚａ-ｚ０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0))
+    .replace(/　/g,' ');
+}
+function norm(s){
+  return half(s).toLowerCase()
+    .replace(/[【〔\[（(][^】〕\])）]{0,40}[】〕\])）]/g,' ')  // 【中古】(CD) などの飾り
+    .replace(PUNCT,' ')
+    .trim();
+}
+function albumKey(s,kw){
+  let t=norm(s).replace(NOISE,' ');
+  for(const w of norm(kw).split(' ')) if(w.length>1) t=t.split(w).join(' ');
+  return t.replace(/\s+/g,'');
+}
+function matchesKeyword(title,kw){
+  const t=norm(title);
+  return norm(kw).split(' ').filter(w=>w).every(w=>t.includes(w));
+}
+
+// ── サイトの選択チップ ──────────────────────────
+function drawSites(){
+  $('sites').innerHTML=SITES.map(s=>{
+    const st=states[s.id]||{};
+    const cls=['site'];
+    if(picked.has(s.id)) cls.push('on');
+    if(st.status==='run') cls.push('run');
+    if(st.status==='error') cls.push('err');
+    let tail='';
+    if(st.status==='ok') tail=' <span class="n">'+st.count+'</span>';
+    else if(st.status==='empty') tail=' <span class="n" style="color:var(--dim)">0</span>';
+    else if(st.status==='error') tail=' <span class="n">×</span>';
+    return '<div class="'+cls.join(' ')+'" data-id="'+s.id+'"><span class="dot"></span>'
+      +esc(s.label)+tail+'</div>';
+  }).join('');
+  for(const el of document.querySelectorAll('.site')){
+    el.onclick=()=>{
+      const id=el.dataset.id;
+      picked.has(id)?picked.delete(id):picked.add(id);
+      if(!picked.size) picked.add(id);   // 全部外すと検索できないので最低 1 つ残す
+      drawSites();
+    };
+  }
+}
+
+// ── 結果の絞り込み ──────────────────────────────
+function filtered(){
+  const kw=$('kw').value.trim();
+  const q=norm($('q').value);
+  const cap=parseInt($('cap').value,10);
+  const onlyUsed=$('onlyUsed').checked, onlyMatch=$('onlyMatch').checked;
+  return hits.filter(h=>{
+    if(onlyUsed && !h.used) return false;
+    if(onlyMatch && kw && !matchesKeyword(h.title,kw)) return false;
+    if(cap>0 && h.price>cap) return false;
+    if(q && !norm(h.title).includes(q) && !norm(h.label).includes(q)) return false;
+    return true;
+  });
+}
+
+function render(){
+  const list=filtered().slice().sort((a,b)=>a.price-b.price);
+  const v=$('view');
+
+  if(!list.length){
+    v.innerHTML='<div class="empty">'+(running
+      ? '<span class="big">探しています…</span>各サイトの結果が届き次第ここに出ます'
+      : (hits.length
+         ? '<span class="big">条件に合うものがありません</span>「中古のみ」や上限円をゆるめてみてください'
+         : '<span class="big">まだ結果がありません</span>アーティスト名を入れて検索してください'))+'</div>';
+    return;
+  }
+
+  if(view==='flat'){
+    v.innerHTML=list.map(h=>
+      '<div class="card"><div class="chead">'
+      +(h.image?'<img class="thumb" src="'+esc(h.image)+'" onerror="this.remove()">':'')
+      +'<div class="ttl">'+esc(h.title)
+      +'<span class="badge">'+esc(h.label)+'</span></div>'
+      +'<div class="price mono">'+yen(h.price)+'</div></div></div>'
+    ).join('')+footNote();
+    for(const [i,el] of [...v.querySelectorAll('.card')].entries())
+      el.onclick=()=>T.open(list[i].url);
+    return;
+  }
+
+  // アルバム別。同じ盤をサイト横断でまとめ、いちばん安い店を上に出す。
+  const kw=$('kw').value.trim();
+  const groups=new Map();
+  for(const h of list){
+    const k=albumKey(h.title,kw)||norm(h.title);
+    if(!groups.has(k)) groups.set(k,{title:h.title,items:[]});
+    const g=groups.get(k);
+    g.items.push(h);
+    if(h.title.length<g.title.length) g.title=h.title;   // いちばん飾りの少ない題名を代表に
+  }
+  const arr=[...groups.values()].map(g=>{
+    g.items.sort((a,b)=>a.price-b.price);
+    // 同じサイトからは最安の 1 件だけ見せる
+    const seen=new Set(), best=[];
+    for(const it of g.items) if(!seen.has(it.site)){seen.add(it.site);best.push(it);}
+    g.offers=best; g.min=best[0].price; g.more=g.items.length-best.length;
+    return g;
+  }).sort((a,b)=>a.min-b.min);
+
+  v.innerHTML=arr.map((g,gi)=>
+    '<div class="card"><div class="chead">'
+    +(g.offers[0].image?'<img class="thumb" src="'+esc(g.offers[0].image)+'" onerror="this.remove()">':'')
+    +'<div class="ttl">'+esc(g.title)+'</div>'
+    +'<div class="price mono">'+yen(g.min)+'<small>最安 '+esc(g.offers[0].label)+'</small></div>'
+    +'</div><div class="offers">'
+    +g.offers.map((o,oi)=>
+      '<div class="of'+(oi===0?' best':'')+'" data-g="'+gi+'" data-o="'+oi+'">'
+      +'<span class="sl">'+esc(o.label)+'</span>'
+      +'<span class="st">'+esc(o.title)+'</span>'
+      +'<span class="sp mono">'+yen(o.price)+'</span></div>').join('')
+    +'</div></div>'
+  ).join('')+footNote();
+
+  for(const el of v.querySelectorAll('.of'))
+    el.onclick=()=>T.open(arr[+el.dataset.g].offers[+el.dataset.o].url);
+}
+
+function footNote(){
+  return '<div class="note">価格は各サイトの検索結果に出ている金額です。送料・手数料は含みません。'
+    +'タップすると商品ページが開きます。</div>';
+}
+
+// ── 状態表示 ────────────────────────────────────
+function drawStat(){
+  const done=SITES.filter(s=>picked.has(s.id)&&['ok','empty','error'].includes((states[s.id]||{}).status)).length;
+  const total=picked.size;
+  $('bar').firstElementChild.style.width=(total?done/total*100:0)+'%';
+  $('bRun').disabled=running;
+  $('bStop').disabled=!running;
+
+  if(running){ $('stat').innerHTML='検索中 <b>'+done+'/'+total+'</b> サイト … 見つかった商品 <b>'+hits.length+'</b> 件'; return; }
+  if(!hits.length && !Object.keys(states).length){ $('stat').textContent='アーティスト名を入れて検索してください'; return; }
+
+  const errs=SITES.filter(s=>(states[s.id]||{}).status==='error');
+  let msg='商品 <b>'+hits.length+'</b> 件（表示 <b>'+filtered().length+'</b> 件）';
+  if(errs.length) msg+=' ／ 取れなかったサイト: '+errs.map(s=>esc(s.label)).join('・')+'（診断で確認できます）';
+  $('stat').innerHTML=msg;
+}
+
+// ── Kotlin からの通知 ───────────────────────────
+window.__native=function(kind,data){
+  if(kind==='start'){ hits=[]; states={}; running=true; }
+  else if(kind==='site'){ states[data.id]=data; }
+  else if(kind==='hits'){ hits=hits.concat(data.items); }
+  else if(kind==='done'){ running=false; for(const s of data.sites) states[s.id]=s; }
+  drawSites(); drawStat(); render();
+};
+
+// ── 起動 ────────────────────────────────────────
+function boot(){
+  SITES=T.sites();
+  picked=new Set(SITES.map(s=>s.id));
+  const st=T.state();
+  hits=st.hits||[]; running=st.running;
+  for(const s of (st.sites||[])) states[s.id]=s;
+  if(st.keyword) $('kw').value=st.keyword;
+
+  $('bRun').onclick=()=>{
+    const w=$('kw').value.trim();
+    if(!w){ $('kw').focus(); return; }
+    hits=[]; states={}; running=true;
+    drawSites(); drawStat(); render();
+    T.search(w,[...picked]);
+  };
+  $('bStop').onclick=()=>{ T.cancel(); $('bStop').disabled=true; };
+  $('bDiag').onclick=()=>T.diagnose();
+  $('bCsv').onclick=()=>{ if(!T.csv()) $('stat').textContent='共有できる結果がありません'; };
+  $('kw').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('bRun').click(); }});
+  $('kw').addEventListener('input',()=>{ $('kx').hidden=!$('kw').value; });
+  $('kx').onclick=()=>{ $('kw').value=''; $('kx').hidden=true; $('kw').focus(); };
+
+  for(const id of ['q','cap']) $(id).addEventListener('input',()=>{drawStat();render();});
+  for(const [box,sw] of [['onlyUsed','swUsed'],['onlyMatch','swMatch']])
+    $(box).addEventListener('change',()=>{ $(sw).classList.toggle('on',$(box).checked); drawStat(); render(); });
+
+  for(const t of document.querySelectorAll('.tab')) t.onclick=()=>{
+    for(const o of document.querySelectorAll('.tab')) o.classList.remove('on');
+    t.classList.add('on'); view=t.dataset.v; render();
+  };
+
+  drawSites(); drawStat(); render();
+}
+boot();
+</script>
+</body></html>

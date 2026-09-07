@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "BookoffChecker"
 include(":app")
+include(":cdprice")

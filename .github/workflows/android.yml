@@ -42,6 +42,10 @@ jobs:
           key: gradle-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-
 
+      - name: Test 最安値サーチの抽出
+        working-directory: android
+        run: ./gradlew --no-daemon :cdprice:testDebugUnitTest
+
       - name: Build debug APK
         working-directory: android
         run: ./gradlew --no-daemon assembleDebug
@@ -51,6 +55,8 @@ jobs:
           mkdir -p out
           cp android/app/build/outputs/apk/debug/app-debug.apk \
              "out/bookoff-checker-${GITHUB_RUN_NUMBER}.apk"
+          cp android/cdprice/build/outputs/apk/debug/cdprice-debug.apk \
+             "out/cd-price-${GITHUB_RUN_NUMBER}.apk"
           ls -la out
 
       - name: Upload artifact
@@ -63,9 +69,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: apk-${{ github.run_number }}
-          name: BOOKOFF 在庫チェッカー build ${{ github.run_number }}
+          name: build ${{ github.run_number }}
           body: |
             スマホのブラウザでこのページを開き、下の .apk をタップするとインストールできます。
             「提供元不明のアプリ」の許可を求められたら許可してください。
+
+            - `bookoff-checker-*.apk` … BOOKOFF 在庫店舗チェッカー
+            - `cd-price-*.apk` … 中古CD最安値サーチ（ブックオフ／ネットオフ／駿河屋／メルカリ／HMV）
           files: out/*.apk
           generate_release_notes: false

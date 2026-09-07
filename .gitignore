@@ -7,6 +7,7 @@ bookoff_mail_config.json
 android/.gradle/
 android/build/
 android/app/build/
+android/cdprice/build/
 android/local.properties
 *.iml
 .idea/
