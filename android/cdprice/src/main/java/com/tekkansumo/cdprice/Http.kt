@@ -21,12 +21,19 @@ object Http {
         .retryOnConnectionFailure(true)
         .build()
 
-    fun get(url: String): Res {
+    /** MusicBrainz は素性の分かる User-Agent を求めるので、店の取得とは分ける。 */
+    const val APP_UA = "CdPriceSearch/1.0 ( https://github.com/tekkansumo-design )"
+
+    fun get(
+        url: String,
+        ua: String = UA,
+        accept: String = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    ): Res {
         return try {
             val req = Request.Builder()
                 .url(url)
-                .header("User-Agent", UA)
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("User-Agent", ua)
+                .header("Accept", accept)
                 .header("Accept-Language", "ja,en-US;q=0.9,en;q=0.8")
                 .build()
             client.newCall(req).execute().use { r ->

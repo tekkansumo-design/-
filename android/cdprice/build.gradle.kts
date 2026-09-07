@@ -41,4 +41,7 @@ dependencies {
     implementation("org.jsoup:jsoup:1.18.3")
 
     testImplementation("junit:junit:4.13.2")
+    // 素の JVM で回す試験でも JSON を読めるようにする。
+    // android.jar のダミーは呼ぶと空を返すので、本物を先に置く
+    testImplementation("org.json:json:20240303")
 }

@@ -62,6 +62,15 @@ class DiagnoseActivity : AppCompatActivity() {
             )
         )
 
+        root.addView(head("アルバム一覧（MusicBrainz）"))
+        root.addView(
+            note("アーティスト名からアルバム一覧を引きます。鍵は要りませんが 1 秒に 1 回までの約束があります。")
+        )
+        root.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(button("試す") { probeMusicBrainz() })
+        })
+
         for (site in Sites.ALL) {
             root.addView(head("${site.label}${if (site.needsJs) "（JavaScript 描画）" else ""}"))
 
@@ -164,6 +173,42 @@ class DiagnoseActivity : AppCompatActivity() {
                 }
                 log("")
             }
+        }.start()
+    }
+
+    private fun probeMusicBrainz() {
+        val word = keyword.text.toString().trim()
+        if (word.isEmpty()) {
+            toast("キーワードを入れてください")
+            return
+        }
+        log("── MusicBrainz ──")
+        Thread {
+            val out = StringBuilder()
+            try {
+                val artists = MusicBrainz.searchArtists(word)
+                out.append("アーティスト候補 ${artists.size} 件\n")
+                for (a in artists.take(5)) {
+                    out.append("  ${a.line}\n")
+                    a.japanese?.let { out.append("     日本語表記: $it\n") }
+                }
+                val first = artists.firstOrNull()
+                if (first == null) {
+                    out.append("※ 見つかりません。別名や英語表記でも試してください。\n")
+                } else {
+                    val list = MusicBrainz.albums(first.id)
+                    out.append("「${first.name}」のアルバム ${list.size} 枚\n")
+                    for (al in list.take(8)) {
+                        out.append("  ${al.year.ifBlank { "----" }} ${al.title}")
+                        if (al.kind.isNotBlank()) out.append(" [${al.kind}]")
+                        out.append("\n")
+                    }
+                    if (list.size > 8) out.append("  … 他 ${list.size - 8} 枚\n")
+                }
+            } catch (e: Exception) {
+                out.append("エラー: ${e.javaClass.simpleName} ${e.message}\n")
+            }
+            runOnUiThread { log(out.toString().trimEnd()); log("") }
         }.start()
     }
 

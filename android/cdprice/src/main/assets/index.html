@@ -72,6 +72,22 @@ background:var(--chip);border:1px solid var(--line);border-radius:7px;cursor:poi
 .of.best .sp{color:var(--hit)}
 .badge{font-size:10.5px;color:var(--dim);border:1px solid var(--line);
 border-radius:10px;padding:1px 7px;margin-left:6px;vertical-align:2px}
+.arow{display:flex;gap:10px;align-items:center;background:var(--panel);
+border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin:0 0 6px}
+.arow .yr{flex:none;width:34px;color:var(--dim);font-size:11.5px}
+.arow .at{flex:1;font-size:13.5px;font-weight:600;line-height:1.4;word-break:break-word}
+.arow .kd{font-size:10px;color:var(--dim);border:1px solid var(--line);
+border-radius:9px;padding:0 6px;margin-left:6px;vertical-align:1px;font-weight:400}
+.arow .ap{flex:none;font-size:14px;font-weight:700;color:var(--gold);
+white-space:nowrap;text-align:right;cursor:pointer}
+.arow .ap small{display:block;font-size:10.5px;color:var(--dim);font-weight:400}
+.arow.miss .at{color:var(--dim);font-weight:400}
+.arow button{padding:4px 10px;font-size:11px;flex:none}
+.picker{display:flex;gap:7px;align-items:center;margin:0 0 10px}
+.picker span{color:var(--dim);font-size:11px;flex:none}
+.picker select{flex:1;background:#0b1013;color:var(--ink);border:1px solid var(--line);
+border-radius:6px;padding:7px;font-size:12px}
+.bulk{display:flex;gap:8px;align-items:center;margin:10px 0 4px}
 .empty{color:var(--dim);font-size:13px;text-align:center;padding:44px 14px;line-height:1.9}
 .empty .big{font-size:15px;color:var(--ink);display:block;margin-bottom:6px}
 .note{color:var(--dim);font-size:11px;line-height:1.7;margin-top:10px}
@@ -99,8 +115,9 @@ border-radius:10px;padding:1px 7px;margin-left:6px;vertical-align:2px}
 <button id="bCsv" style="padding:5px 10px;font-size:11px">CSV</button>
 </div>
 <div class="tabs">
-<div class="tab on" data-v="album">アルバム別の最安</div>
-<div class="tab" data-v="flat">全部を安い順</div>
+<div class="tab on" data-v="album">見つかった順</div>
+<div class="tab" data-v="disco">ディスコグラフィ</div>
+<div class="tab" data-v="flat">安い順</div>
 </div>
 </header>
 <main><div id="view"></div></main>
@@ -111,6 +128,8 @@ const T={
   sites:()=>JSON.parse(App.getSites()),
   state:()=>JSON.parse(App.getState()),
   search:(w,ids)=>App.search(w,JSON.stringify(ids)),
+  searchAlbums:(ts,ids)=>App.searchAlbums(JSON.stringify(ts),JSON.stringify(ids)),
+  pickArtist:id=>App.pickArtist(id),
   cancel:()=>App.cancel(),
   clear:()=>App.clear(),
   open:u=>App.open(u),
@@ -119,19 +138,24 @@ const T={
 };
 
 let SITES=[], picked=new Set(), hits=[], states={}, view='album', running=false;
+let disco={loading:false,error:null,artistId:null,artists:[],albums:[]};
+let sub=null;              // 盤ごとの追加検索の経過
+let kwUsed='';             // 実際に検索した語。入力欄をいじられても結果と食い違わせない
+let tabTouched=false;      // 一覧が届いたら自動で切り替えるが、手で選んだあとは動かさない
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const yen=n=>'¥'+Number(n).toLocaleString('ja-JP');
+const curKw=()=>kwUsed||$('kw').value.trim();
 
 // ── 題名の正規化 ────────────────────────────────
 // サイトごとに「【中古】」「(CD)」「帯付き」などの飾りが違うので、
-// それらを落としてから突き合わせないと同じ盤が別物として並ぶ。
+// それらを落としてから突き合わせないと同じ盤が別物として並ばない。
 const NOISE=/中古|used|新品|未開封|美品|帯付き?|帯あり|特典|限定盤|通常盤|初回限定盤?|初回盤|完全生産限定|送料無料|レンタル落ち|ケース交換|紙ジャケ|リマスター|remaster|国内盤|輸入盤|盤面良好|disc|ディスク|アルバム|album|cd|dvd|blu\s*-?\s*ray|ブルーレイ/gi;
 
 // 記号は半角も全角も落とす。「First Love／宇多田ヒカル」と
 // 「【中古】First Love / 宇多田ヒカル」を同じ盤として扱うため。
-const PUNCT=/[!-\/:-@\[-`{-~\uFF01-\uFF0F\uFF1A-\uFF20\uFF3B-\uFF40\uFF5B-\uFF65\u3000-\u303F\u30FC\uFF70\s]+/g;
+const PUNCT=/[!-\/:-@\[-`{-~！-／：-＠［-｀｛-･　-〿ーｰ\s]+/g;
 
 function half(s){
   return String(s||'').replace(/[Ａ-Ｚａ-ｚ０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0))
@@ -148,6 +172,7 @@ function albumKey(s,kw){
   for(const w of norm(kw).split(' ')) if(w.length>1) t=t.split(w).join(' ');
   return t.replace(/\s+/g,'');
 }
+const akey=s=>albumKey(s,curKw());
 function matchesKeyword(title,kw){
   const t=norm(title);
   return norm(kw).split(' ').filter(w=>w).every(w=>t.includes(w));
@@ -180,7 +205,7 @@ function drawSites(){
 
 // ── 結果の絞り込み ──────────────────────────────
 function filtered(){
-  const kw=$('kw').value.trim();
+  const kw=curKw();
   const q=norm($('q').value);
   const cap=parseInt($('cap').value,10);
   const onlyUsed=$('onlyUsed').checked, onlyMatch=$('onlyMatch').checked;
@@ -193,7 +218,50 @@ function filtered(){
   });
 }
 
+// 同じ盤をサイト横断でまとめ、サイトごとの最安を 1 件ずつ持たせる
+function groupByAlbum(list){
+  const g=new Map();
+  for(const h of list){
+    const k=akey(h.title)||norm(h.title);
+    if(!g.has(k)) g.set(k,{title:h.title,items:[]});
+    const e=g.get(k);
+    e.items.push(h);
+    if(h.title.length<e.title.length) e.title=h.title;  // いちばん飾りの少ない題名を代表に
+  }
+  return [...g.values()].map(e=>{
+    e.items.sort((a,b)=>a.price-b.price);
+    const seen=new Set(), best=[];
+    for(const it of e.items) if(!seen.has(it.site)){seen.add(it.site);best.push(it);}
+    e.offers=best; e.min=best[0].price;
+    return e;
+  }).sort((a,b)=>a.min-b.min);
+}
+
+// アルバム 1 枚に当てはまる出品を拾う
+function offersFor(albumTitle,list){
+  const ak=akey(albumTitle);
+  if(ak.length<2) return [];
+  const out=list.filter(h=>{
+    const hk=akey(h.title);
+    if(!hk) return false;
+    if(hk.includes(ak)) return true;
+    // 店側が短く書いている場合。短すぎる語での取り違えは避ける
+    return hk.length>=6 && ak.includes(hk);
+  });
+  out.sort((a,b)=>a.price-b.price);
+  const seen=new Set(), best=[];
+  for(const it of out) if(!seen.has(it.site)){seen.add(it.site);best.push(it);}
+  return best;
+}
+
+function footNote(){
+  return '<div class="note">価格は各サイトの検索結果に出ている金額です。送料・手数料は含みません。'
+    +'タップすると商品ページが開きます。</div>';
+}
+
+// ── 描画 ────────────────────────────────────────
 function render(){
+  if(view==='disco') return renderDisco();
   const list=filtered().slice().sort((a,b)=>a.price-b.price);
   const v=$('view');
 
@@ -219,25 +287,7 @@ function render(){
     return;
   }
 
-  // アルバム別。同じ盤をサイト横断でまとめ、いちばん安い店を上に出す。
-  const kw=$('kw').value.trim();
-  const groups=new Map();
-  for(const h of list){
-    const k=albumKey(h.title,kw)||norm(h.title);
-    if(!groups.has(k)) groups.set(k,{title:h.title,items:[]});
-    const g=groups.get(k);
-    g.items.push(h);
-    if(h.title.length<g.title.length) g.title=h.title;   // いちばん飾りの少ない題名を代表に
-  }
-  const arr=[...groups.values()].map(g=>{
-    g.items.sort((a,b)=>a.price-b.price);
-    // 同じサイトからは最安の 1 件だけ見せる
-    const seen=new Set(), best=[];
-    for(const it of g.items) if(!seen.has(it.site)){seen.add(it.site);best.push(it);}
-    g.offers=best; g.min=best[0].price; g.more=g.items.length-best.length;
-    return g;
-  }).sort((a,b)=>a.min-b.min);
-
+  const arr=groupByAlbum(list);
   v.innerHTML=arr.map((g,gi)=>
     '<div class="card"><div class="chead">'
     +(g.offers[0].image?'<img class="thumb" src="'+esc(g.offers[0].image)+'" onerror="this.remove()">':'')
@@ -256,9 +306,72 @@ function render(){
     el.onclick=()=>T.open(arr[+el.dataset.g].offers[+el.dataset.o].url);
 }
 
-function footNote(){
-  return '<div class="note">価格は各サイトの検索結果に出ている金額です。送料・手数料は含みません。'
-    +'タップすると商品ページが開きます。</div>';
+// MusicBrainz から取った発売作の一覧に、店で見つかった値段を突き合わせる。
+// 店の結果だけでは「何枚あるうちの何枚が見つかったか」が分からない。
+function renderDisco(){
+  const v=$('view');
+  let head='';
+  if(disco.artists.length>1){
+    head='<div class="picker"><span>アーティスト</span><select id="artistSel">'
+      +disco.artists.map(a=>'<option value="'+esc(a.id)+'"'
+        +(a.id===disco.artistId?' selected':'')+'>'+esc(a.line)+'</option>').join('')
+      +'</select></div>';
+  }
+
+  if(!disco.albums.length){
+    v.innerHTML=head+'<div class="empty">'+(disco.loading
+      ? '<span class="big">アルバム一覧を調べています…</span>MusicBrainz から取っています'
+      : disco.error
+        ? '<span class="big">一覧を取れませんでした</span>'+esc(disco.error)
+          +'<br>別名や英語表記でも試してみてください'
+        : '<span class="big">アルバム一覧がありません</span>アーティスト名で検索すると出ます')
+      +'</div>';
+    wirePicker();
+    return;
+  }
+
+  const list=filtered();
+  const rows=disco.albums.map(a=>({album:a,offers:offersFor(a.title,list)}));
+  const miss=rows.filter(r=>!r.offers.length);
+
+  const bulk='<div class="bulk">'
+    +(miss.length && !running
+      ? '<button class="go" id="bMiss">見つからない '+miss.length+' 枚を名指しで探す</button>'
+      : '')
+    +'<span class="note" style="margin:0">'
+    +disco.albums.length+' 枚中 '+(rows.length-miss.length)+' 枚に値段あり</span></div>';
+
+  v.innerHTML=head+bulk+rows.map((r,i)=>{
+    const o=r.offers[0];
+    return '<div class="arow'+(o?'':' miss')+'" data-i="'+i+'">'
+      +'<span class="yr mono">'+esc(r.album.year||'—')+'</span>'
+      +'<span class="at">'+esc(r.album.title)
+      +(r.album.kind?'<span class="kd">'+esc(r.album.kind)+'</span>':'')+'</span>'
+      +(o
+        ? '<span class="ap mono">'+yen(o.price)+'<small>'+esc(o.label)
+          +(r.offers.length>1?' 他'+(r.offers.length-1):'')+'</small></span>'
+        : '<button data-find="'+i+'">探す</button>')
+      +'</div>';
+  }).join('')+footNote();
+
+  wirePicker();
+  for(const el of v.querySelectorAll('.ap'))
+    el.onclick=()=>T.open(rows[+el.parentElement.dataset.i].offers[0].url);
+  for(const el of v.querySelectorAll('button[data-find]'))
+    el.onclick=()=>{
+      if(running) return;
+      T.searchAlbums([rows[+el.dataset.find].album.title],[...picked]);
+    };
+  const bm=$('bMiss');
+  if(bm) bm.onclick=()=>{
+    if(running) return;
+    T.searchAlbums(miss.map(r=>r.album.title),[...picked]);
+  };
+}
+
+function wirePicker(){
+  const sel=$('artistSel');
+  if(sel) sel.onchange=()=>{ disco.albums=[]; disco.loading=true; T.pickArtist(sel.value); render(); };
 }
 
 // ── 状態表示 ────────────────────────────────────
@@ -269,21 +382,50 @@ function drawStat(){
   $('bRun').disabled=running;
   $('bStop').disabled=!running;
 
-  if(running){ $('stat').innerHTML='検索中 <b>'+done+'/'+total+'</b> サイト … 見つかった商品 <b>'+hits.length+'</b> 件'; return; }
-  if(!hits.length && !Object.keys(states).length){ $('stat').textContent='アーティスト名を入れて検索してください'; return; }
+  if(sub&&sub.running){
+    $('stat').innerHTML='盤ごとに検索中 <b>'+(sub.index+1)+'/'+sub.total+'</b> … '
+      +esc(sub.title||'')+' ／ 商品 <b>'+hits.length+'</b> 件';
+    return;
+  }
+  if(running){
+    $('stat').innerHTML='検索中 <b>'+done+'/'+total+'</b> サイト … 見つかった商品 <b>'+hits.length+'</b> 件';
+    return;
+  }
+  if(!hits.length && !Object.keys(states).length){
+    $('stat').textContent='アーティスト名を入れて検索してください';
+    return;
+  }
 
-  const errs=SITES.filter(s=>(states[s.id]||{}).status==='error');
   let msg='商品 <b>'+hits.length+'</b> 件（表示 <b>'+filtered().length+'</b> 件）';
+  if(disco.albums.length) msg+=' ／ アルバム <b>'+disco.albums.length+'</b> 枚';
+  else if(disco.loading) msg+=' ／ アルバム一覧を取得中';
+  const errs=SITES.filter(s=>(states[s.id]||{}).status==='error');
   if(errs.length) msg+=' ／ 取れなかったサイト: '+errs.map(s=>esc(s.label)).join('・')+'（診断で確認できます）';
   $('stat').innerHTML=msg;
 }
 
+function setTab(v){
+  view=v;
+  for(const o of document.querySelectorAll('.tab')) o.classList.toggle('on',o.dataset.v===v);
+}
+
 // ── Kotlin からの通知 ───────────────────────────
 window.__native=function(kind,data){
-  if(kind==='start'){ hits=[]; states={}; running=true; }
+  if(kind==='start'){ hits=[]; states={}; running=true; sub=null;
+    disco={loading:true,error:null,artistId:null,artists:[],albums:[]};
+    kwUsed=data.keyword||kwUsed; }
   else if(kind==='site'){ states[data.id]=data; }
   else if(kind==='hits'){ hits=hits.concat(data.items); }
-  else if(kind==='done'){ running=false; for(const s of data.sites) states[s.id]=s; }
+  else if(kind==='subrun'){ sub=data; running=data.running; }
+  else if(kind==='disco'){
+    const had=disco.albums.length;
+    disco=data;
+    // 一覧が初めて届いたら見せる。手でタブを選んだあとは動かさない
+    if(!had && disco.albums.length && !tabTouched) setTab('disco');
+  }
+  else if(kind==='done'){ running=false; sub=null;
+    for(const s of (data.sites||[])) states[s.id]=s;
+    if(data.disco) disco=data.disco; }
   drawSites(); drawStat(); render();
 };
 
@@ -294,12 +436,16 @@ function boot(){
   const st=T.state();
   hits=st.hits||[]; running=st.running;
   for(const s of (st.sites||[])) states[s.id]=s;
-  if(st.keyword) $('kw').value=st.keyword;
+  if(st.disco) disco=st.disco;
+  if(st.keyword){ $('kw').value=st.keyword; kwUsed=st.keyword; $('kx').hidden=false; }
 
   $('bRun').onclick=()=>{
     const w=$('kw').value.trim();
     if(!w){ $('kw').focus(); return; }
-    hits=[]; states={}; running=true;
+    kwUsed=w; tabTouched=false;
+    hits=[]; states={}; sub=null; running=true;
+    disco={loading:true,error:null,artistId:null,artists:[],albums:[]};
+    setTab('album');
     drawSites(); drawStat(); render();
     T.search(w,[...picked]);
   };
@@ -315,8 +461,7 @@ function boot(){
     $(box).addEventListener('change',()=>{ $(sw).classList.toggle('on',$(box).checked); drawStat(); render(); });
 
   for(const t of document.querySelectorAll('.tab')) t.onclick=()=>{
-    for(const o of document.querySelectorAll('.tab')) o.classList.remove('on');
-    t.classList.add('on'); view=t.dataset.v; render();
+    tabTouched=true; setTab(t.dataset.v); render();
   };
 
   drawSites(); drawStat(); render();

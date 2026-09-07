@@ -143,6 +143,20 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun searchAlbums(titlesJson: String, sitesJson: String) {
+            val titles = ArrayList<String>()
+            val t = JSONArray(titlesJson)
+            for (i in 0 until t.length()) titles.add(t.getString(i))
+            val ids = ArrayList<String>()
+            val a = JSONArray(sitesJson)
+            for (i in 0 until a.length()) ids.add(a.getString(i))
+            Finder.searchAlbums(this@MainActivity, titles, ids)
+        }
+
+        @JavascriptInterface
+        fun pickArtist(mbid: String) = Finder.pickArtist(mbid)
+
+        @JavascriptInterface
         fun cancel() = Finder.cancel()
 
         @JavascriptInterface
