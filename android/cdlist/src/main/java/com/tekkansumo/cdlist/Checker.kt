@@ -1,5 +1,6 @@
 package com.tekkansumo.cdlist
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -106,10 +107,14 @@ object Checker {
 
     private var artist = ""
     private var plan: List<Target> = emptyList()
+    private var mode = "cd"          // "cd"=作品→在庫 / "store"=商品→店舗
+    private var storeKey = ""
 
-    fun setPlan(a: String, items: List<Target>): Int {
+    fun setPlan(a: String, items: List<Target>, how: String = "cd", store: String = ""): Int {
         artist = a
         plan = items
+        mode = if (how == "store") "store" else "cd"
+        storeKey = store
         return plan.size
     }
 
@@ -128,14 +133,16 @@ object Checker {
         val queue = ConcurrentLinkedQueue(plan)
         val total = plan.size
         val done = AtomicInteger(0)
-        emit("status", JSONObject().put("msg", "${total}件を照会します"))
+        emit("status", JSONObject().put(
+            "msg", "${total}件を照会します" +
+                    if (mode == "store" && storeKey.isNotEmpty()) "（$storeKey の在庫）" else ""))
 
         val threads = (1..minOf(6, maxOf(1, total))).map {
             Thread {
                 while (!cancelled.get()) {
                     val t = queue.poll() ?: break
                     val res = try {
-                        checkOne(t)
+                        if (mode == "store") checkStore(t) else checkOne(t)
                     } catch (e: Exception) {   // 1 件の失敗で全体を止めない
                         JSONObject().put("state", "error")
                             .put("note", "${e.javaClass.simpleName}: ${e.message}")
@@ -191,6 +198,58 @@ object Checker {
         return JSONObject().put("state", "none")
     }
 
+    /** その商品が指定の店舗にあるかを、商品ページの在庫店舗から見る。 */
+    private fun checkStore(t: Target): JSONObject {
+        val url = "${Bookoff.ORIGIN}/used/${t.id}"
+        val res = fetchPaced(url) ?: return JSONObject().put("state", "cancelled")
+        if (res.error != null) {
+            return JSONObject().put("state", "error").put("note", res.error)
+        }
+        if (res.code != 200) {
+            return JSONObject().put("state", "error").put("note", "HTTP ${res.code}")
+        }
+        val shops = Shops.parse(res.body, url)
+        val hit = Shops.filter(shops, storeKey)
+        return JSONObject().apply {
+            put("state", if (hit.isNotEmpty()) "stock" else "none")
+            put("shops", JSONArray(hit))
+            put("all", shops.size)
+            put("url", url)
+        }
+    }
+
+    /**
+     * 1 ページ取る。403/503 と通信エラーは並列を落として待ってから粘る。
+     * 中止されたら null。
+     */
+    private fun fetchPaced(url: String): Res? {
+        while (!cancelled.get()) {
+            if (!Gate.acquire { cancelled.get() }) return null
+            val res = try {
+                Http.get(url)
+            } finally {
+                Gate.release()
+            }
+            if (res.error != null) {
+                val wait = Gate.onError()
+                emit("status", JSONObject().put(
+                    "msg", "通信エラー ${wait / 1000}秒待機 / 並列 ${Gate.workers}"))
+                if (sleepUnlessCancelled(wait)) return null
+                continue
+            }
+            if (res.code == 403 || res.code == 429 || res.code == 503) {
+                val wait = Gate.onError()
+                emit("status", JSONObject().put(
+                    "msg", "HTTP ${res.code} — ${wait / 1000}秒待機 / 並列 ${Gate.workers}"))
+                if (sleepUnlessCancelled(wait)) return null
+                continue
+            }
+            if (res.code == 200) Gate.onOk()
+            return res
+        }
+        return null
+    }
+
     /** 戻り値は (見つかった商品, 使った URL, エラー)。 */
     private fun search(keyword: String): Triple<List<Found>, String, String?> {
         val known = Bookoff.good
@@ -202,53 +261,21 @@ object Checker {
         for (tpl in tries) {
             val url = Bookoff.urlFor(tpl, keyword)
             lastUrl = url
-            while (!cancelled.get()) {
-                if (!Gate.acquire { cancelled.get() }) {
-                    return Triple(emptyList(), url, "cancelled")
-                }
-                val res = try {
-                    Http.get(url)
-                } finally {
-                    Gate.release()
-                }
-
-                if (res.error != null) {
-                    val wait = Gate.onError()
-                    emit("status", JSONObject().put(
-                        "msg", "通信エラー ${wait / 1000}秒待機 / 並列 ${Gate.workers}"))
-                    if (sleepUnlessCancelled(wait)) {
-                        return Triple(emptyList(), url, "cancelled")
-                    }
-                    continue
-                }
-                if (res.code == 403 || res.code == 429 || res.code == 503) {
-                    val wait = Gate.onError()
-                    emit("status", JSONObject().put(
-                        "msg", "HTTP ${res.code} — ${wait / 1000}秒待機 / 並列 ${Gate.workers}"))
-                    if (sleepUnlessCancelled(wait)) {
-                        return Triple(emptyList(), url, "cancelled")
-                    }
-                    continue
-                }
-                if (res.code != 200) {
-                    lastErr = "HTTP ${res.code}"
-                    break                       // この URL の形が違う。次の候補へ
-                }
-
-                Gate.onOk()
-                val items = Bookoff.parse(res.body)
-                if (items.isNotEmpty()) {
-                    Bookoff.good = tpl
-                    return Triple(items, url, null)
-                }
-                if (Bookoff.noHit(res.body)) {
-                    // ページは開けている。単に商品が無いだけ
-                    Bookoff.good = tpl
-                    return Triple(emptyList(), url, null)
-                }
-                break
+            val res = fetchPaced(url) ?: return Triple(emptyList(), url, "cancelled")
+            if (res.code != 200) {
+                lastErr = "HTTP ${res.code}"
+                continue                        // この URL の形が違う。次の候補へ
             }
-            if (cancelled.get()) return Triple(emptyList(), lastUrl, "cancelled")
+            val items = Bookoff.parse(res.body)
+            if (items.isNotEmpty()) {
+                Bookoff.good = tpl
+                return Triple(items, url, null)
+            }
+            if (Bookoff.noHit(res.body)) {
+                // ページは開けている。単に商品が無いだけ
+                Bookoff.good = tpl
+                return Triple(emptyList(), url, null)
+            }
         }
         return Triple(emptyList(), lastUrl, lastErr ?: "検索結果を読み取れませんでした")
     }

@@ -55,8 +55,9 @@ const ask=(fn,arg)=>new Promise(r=>{ const id=++RQ; PEND[id]=r; App[fn](id,arg);
 const T={
   artists:q=>ask('artists',q),
   disco:m=>ask('disco',m),
+  explore:u=>ask('explore',u),
   setOwned:async(id,owned,meta)=>JSON.parse(App.setOwned(id,owned,JSON.stringify(meta))),
-  plan:async(artist,items)=>JSON.parse(App.plan(artist,JSON.stringify(items))),
+  plan:async o=>JSON.parse(App.plan(JSON.stringify(o))),
   start:()=>App.start(),
   stopStream(){},          // アプリでは張りっぱなしの接続が無い
   cancel:async()=>App.cancel(),

@@ -72,6 +72,16 @@ RAMP_AFTER = 4
 THREADS = MAX_WORKERS
 
 PROD_RE = re.compile(r"/(used|goods)/(\d{6,})")
+SHOP_PATH_RE = re.compile(r"/shop/shop\d+", re.I)
+SHOP_HOST_RE = re.compile(r"(^|\.)bookoff\.co\.jp$", re.I)
+# 分類として拾わないパス。商品・店舗・案内ページなど
+NOT_GENRE_RE = re.compile(
+    r"/(used|goods|shop|help|guide|info|login|logout|mypage|cart|favorite"
+    r"|inquiry|privacy|policy|terms|company|sitemap|news|campaign)(/|$)", re.I)
+NEXT_RE = re.compile(r"^(次|次へ|次のページ|next|›|»|>)$", re.I)
+# ページ送りのリンク。分類と同じ階層に並ぶので、分類として拾わないよう外す
+PAGER_RE = re.compile(r"^(\d+|次|次へ|次のページ|前|前へ|最初|最後|先頭|末尾"
+                      r"|next|prev|previous|first|last|›|‹|»|«|>|<)$", re.I)
 PRICE_RE = re.compile(r"(?:[¥￥]\s*([0-9][0-9,]*)|([0-9][0-9,]*)\s*円)")
 SOLD_RE = re.compile(r"売り?切れ|品切れ|在庫切れ|在庫がありません|SOLD\s*OUT", re.I)
 INSTOCK_RE = re.compile(r"カートに入れる|在庫あり|購入手続き|残り\s*\d+")
@@ -98,7 +108,8 @@ STATE = {
     "workers": START_WORKERS,
     "results": {},      # rgid -> 在庫チェック結果
 }
-PLAN = {"artist": "", "items": []}      # 次に /run で流す対象
+# 次に /run で流す対象。mode は "cd"（作品→在庫）か "store"（商品→店舗）
+PLAN = {"artist": "", "items": [], "mode": "cd", "store": ""}
 CANCEL = threading.Event()
 LOCK = threading.Lock()
 DISCO_CACHE = {}        # mbid -> [作品, ...]
@@ -452,6 +463,201 @@ def parse_results(html_text):
     return items
 
 
+class LinkScan(HTMLParser):
+    """<a href> と、その中の文字だけを拾う軽量パーサ。
+
+    分類たどりと在庫店舗の読み取りで使う。bs4 も標準の html.parser を
+    使っていたので、依存を増やさず同じことをする。
+    """
+
+    SKIP = {"script", "style", "noscript"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self._links = []         # [[href, [文字, ...]], ...] 出現順
+        self._open = []          # 開いている <a> の位置（None=href無し）
+        self._skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.SKIP:
+            self._skip += 1
+        elif tag == "a":
+            href = dict(attrs).get("href")
+            if href:
+                self._links.append([href, []])
+                self._open.append(len(self._links) - 1)
+            else:
+                self._open.append(None)
+
+    def handle_endtag(self, tag):
+        if tag in self.SKIP:
+            self._skip = max(0, self._skip - 1)
+        elif tag == "a" and self._open:
+            self._open.pop()
+
+    def handle_data(self, data):
+        if self._skip:
+            return
+        if self._open and self._open[-1] is not None:
+            self._links[self._open[-1]][1].append(data)
+
+    @property
+    def links(self):
+        return [(href, norm_text("".join(buf))) for href, buf in self._links]
+
+
+def scan_page(html_text):
+    """HTML から [(href, 表示文字), ...] を返す。"""
+    p = LinkScan()
+    try:
+        p.feed(html_text)
+    except Exception:
+        pass                    # 壊れた HTML でもそこまでの結果を使う
+    p.close()
+    return None, p.links
+
+
+def same_host_links(base_url, links):
+    """同じサイト内のリンクだけを (パス, 表示文字, URL) で返す。"""
+    out = []
+    for raw, text in links:
+        href = urljoin(base_url, (raw or "").strip())
+        u = urlparse(href)
+        if u.scheme not in ("http", "https"):
+            continue
+        if not SHOP_HOST_RE.search(u.hostname or ""):
+            continue
+        t = norm_text(text)
+        if not t:
+            continue
+        out.append((u.path, t, href.split("#")[0]))
+    return out
+
+
+def pick_genre_links(base_url, links):
+    """分類リンクを推測する。
+
+    分類の URL の形はこちらで決め打ちしない。同じ階層に並ぶ兄弟リンクが
+    いちばん多いところが分類の一覧である、という当て方をする。サイトの
+    作りが変わっても、リンクが並んでいる限り辿れる。
+    """
+    groups = {}
+    seen = set()
+    for path, text, href in same_host_links(base_url, links):
+        if NOT_GENRE_RE.search(path) or path in ("", "/"):
+            continue
+        if len(text) > 30:
+            continue          # 説明文のようなリンクは分類ではない
+        if PAGER_RE.match(text):
+            continue          # 「1」「次へ」などのページ送り
+        if href in seen:
+            continue
+        seen.add(href)
+        segs = [x for x in path.split("/") if x]
+        prefix = "/".join(segs[:-1]) if len(segs) > 1 else (segs[0] if segs else "")
+        groups.setdefault(prefix, []).append({"label": text, "url": href})
+
+    if not groups:
+        return []
+    best = max(groups.values(), key=len)
+    return best if len(best) >= 3 else []
+
+
+def find_next_page(base_url, links):
+    """「次へ」に当たるリンク。ページ送り用。"""
+    for path, text, href in same_host_links(base_url, links):
+        if NEXT_RE.match(text):
+            return href
+    return None
+
+
+def explore_page(sess, url):
+    """分類ページを開いて (分類リンク, 商品, 次ページ) を返す。"""
+    r, err = fetch(sess, url)
+    if err:
+        return {"ok": False, "msg": err}
+    _, links = scan_page(r.text)
+    return {
+        "ok": True,
+        "url": url,
+        "links": pick_genre_links(url, links),
+        "items": parse_results(r.text),
+        "next": find_next_page(url, links),
+        "found": len(links),
+    }
+
+
+def parse_shops(base_url, links):
+    """商品ページのリンク一覧から在庫店舗を抜く。
+
+    bookoff_web.py（在庫店舗チェッカー）と同じ見方。実店舗のページは
+    /shop/shopNNNN で、そこへのリンクが在庫のある店として並ぶ。
+    """
+    shops, seen = [], set()
+    for raw_href, text in links:
+        href = urljoin(base_url, (raw_href or "").strip())
+        u = urlparse(href)
+        if u.scheme not in ("http", "https"):
+            continue
+        if not SHOP_HOST_RE.search(u.hostname or ""):
+            continue
+        if not SHOP_PATH_RE.search(u.path):
+            continue          # 「店舗検索」など実店舗でないリンクを除外
+        t = norm_text(text)
+        if not t or t == "店舗検索":
+            continue
+        key = f"{u.netloc}{u.path}"
+        if key in seen:
+            continue
+        seen.add(key)
+        shops.append(t)
+    return shops
+
+
+def fetch(sess, url):
+    """1 ページ取る。403/503 は待って粘る。戻りは (応答, エラー)。"""
+    while not CANCEL.is_set():
+        if not sess.acquire():
+            return None, "cancelled"
+        try:
+            r = sess.s.get(url, timeout=25)
+        except requests.RequestException as e:
+            sess.release()
+            wait = sess.on_error()
+            publish("status", {"msg": f"通信エラー ({type(e).__name__}) "
+                                      f"{wait}秒待機 / 並列 {sess.workers}"})
+            _sleep(wait)
+            continue
+        else:
+            sess.release()
+        if r.status_code in (403, 429, 503):
+            wait = sess.on_error()
+            publish("status", {"msg": f"HTTP {r.status_code} — {wait}秒待機 "
+                                      f"/ 並列 {sess.workers}"})
+            _sleep(wait + random.uniform(0, 2))
+            continue
+        if r.status_code != 200:
+            return None, f"HTTP {r.status_code}"
+        sess.on_ok()
+        return r, None
+    return None, "cancelled"
+
+
+def check_store(sess, pid, keyword):
+    """商品が指定の店舗にあるか見る。戻りは在庫店舗名の一覧。"""
+    url = f"{BOOKOFF_ORIGIN}/used/{pid}"
+    r, err = fetch(sess, url)
+    if err:
+        return {"state": "error", "note": err} if err != "cancelled" \
+            else {"state": "cancelled"}
+    _, links = scan_page(r.text)
+    shops = parse_shops(url, links)
+    key = norm_key(keyword)
+    hit = [s for s in shops if key in norm_key(s)] if key else shops
+    return {"state": "stock" if hit else "none", "shops": hit,
+            "all": len(shops), "url": url}
+
+
 def bookoff_search(sess, keyword):
     """検索して商品一覧を返す。(items, 使ったURL, エラー文字列)"""
     kw = quote(keyword, safe="")
@@ -572,11 +778,14 @@ def check_one(sess, artist, item):
 # ═══════════════════════════════════════════════
 def run_check():
     artist = PLAN["artist"]
+    mode = PLAN.get("mode", "cd")
+    store = PLAN.get("store", "")
     targets = list(PLAN["items"])
     with LOCK:
         STATE.update(running=True, total=len(targets), done=0,
                      results={}, workers=START_WORKERS)
-    publish("status", {"msg": f"{len(targets)}件を照会します"})
+    publish("status", {"msg": f"{len(targets)}件を照会します"
+                              + (f"（{store} の在庫）" if mode == "store" and store else "")})
 
     sess = Session()
     work = queue.Queue()
@@ -590,7 +799,10 @@ def run_check():
             except queue.Empty:
                 return
             try:
-                res = check_one(sess, artist, it)
+                if mode == "store":
+                    res = check_store(sess, it.get("id"), store)
+                else:
+                    res = check_one(sess, artist, it)
             except Exception as e:                    # 1件の失敗で全体を止めない
                 res = {"state": "error", "note": f"{type(e).__name__}: {e}"}
             res["id"] = it.get("id")
@@ -678,7 +890,7 @@ def api_owned_set():
 
 @app.post("/api/plan")
 def api_plan():
-    """これから在庫を見る作品を預ける。EventSource は GET しか出せないため。"""
+    """これから調べる対象を預ける。EventSource は GET しか出せないため。"""
     with LOCK:
         if STATE["running"]:
             return jsonify({"ok": False, "msg": "実行中です"}), 409
@@ -687,9 +899,22 @@ def api_plan():
     if not isinstance(items, list) or not items:
         return jsonify({"ok": False, "msg": "対象がありません"}), 400
     PLAN["artist"] = str(d.get("artist") or "")
+    PLAN["mode"] = "store" if d.get("mode") == "store" else "cd"
+    PLAN["store"] = str(d.get("store") or "")
     PLAN["items"] = [{"id": str(x.get("id") or ""), "title": str(x.get("title") or "")}
                      for x in items[:500] if isinstance(x, dict)]
     return jsonify({"ok": True, "count": len(PLAN["items"])})
+
+
+@app.get("/api/explore")
+def api_explore():
+    """分類ページを 1 枚開いて、下位の分類と商品を返す。"""
+    url = (request.args.get("url") or BOOKOFF_ORIGIN).strip()
+    u = urlparse(url)
+    if u.scheme not in ("http", "https") or not SHOP_HOST_RE.search(u.hostname or ""):
+        return jsonify({"ok": False, "msg": "BOOKOFF のページを指定してください"}), 400
+    CANCEL.clear()
+    return jsonify(explore_page(Session(), url))
 
 
 @app.get("/run")
@@ -817,8 +1042,17 @@ input[type=checkbox]{width:auto;accent-color:var(--hit)}
 white-space:nowrap;margin:0;cursor:pointer;user-select:none}
 .sw.on{color:var(--hit)}
 .filt{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:8px}
-#cands{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
-#cands:empty{display:none}
+.tabs{display:flex;gap:4px;margin:0 0 8px}
+.tab{padding:6px 14px;border-radius:6px 6px 0 0;font-size:12px;cursor:pointer;
+color:var(--dim);border:1px solid transparent;border-bottom:none;user-select:none}
+.tab.on{background:var(--bg);color:var(--hit);border-color:var(--line)}
+#cands,#gcands{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+#cands:empty,#gcands:empty{display:none}
+#crumb{margin-top:7px;font-size:11px;color:var(--dim);line-height:1.7}
+#crumb b{color:var(--hit);font-weight:700}
+#crumb .sep{opacity:.4;margin:0 5px}
+td.sh{font-size:12px;line-height:1.6;min-width:150px;word-break:break-word}
+td.sh .hit{color:var(--ok);font-weight:700}
 .chip{border:1px solid var(--line);border-radius:13px;padding:4px 11px;font-size:12px;
 cursor:pointer;color:var(--dim);background:var(--chip);line-height:1.5}
 .chip:hover{border-color:var(--hit);color:var(--ink)}
@@ -876,7 +1110,12 @@ opacity:0;transition:opacity .2s;pointer-events:none;z-index:20}
 .saved.on{opacity:1}
 </style></head><body>
 <header>
-<h1>アーティストCDリスト × BOOKOFF オンライン</h1>
+<h1>CDリスト × BOOKOFF オンライン</h1>
+<div class="tabs">
+<div class="tab on" data-t="artist">アーティストで探す</div>
+<div class="tab" data-t="genre">ジャンルで探す</div>
+</div>
+<div id="panArtist">
 <div class="row">
 <input type="text" id="artist" placeholder="アーティスト名（例: 宇多田ヒカル）">
 <button class="go" id="bFind">アーティスト検索</button>
@@ -905,6 +1144,28 @@ opacity:0;transition:opacity .2s;pointer-events:none;z-index:20}
 <button id="bCsv">CSV</button>
 <button id="bDiag">診断</button>
 </div>
+</div>
+
+<div id="panGenre" hidden>
+<div class="row">
+<button id="gTop">BOOKOFF のトップから</button>
+<button id="gBack" disabled>ひとつ戻る</button>
+<input type="text" id="gUrl" placeholder="BOOKOFF のページの URL を直接貼ってもよい">
+<button id="gGo">開く</button>
+</div>
+<div id="crumb"></div>
+<div id="gcands"></div>
+<div class="row" style="margin-top:8px">
+<input type="text" id="gStore" style="max-width:200px"
+ placeholder="店舗名の一部（例: 町田）"
+ title="空のままだと在庫のある店をすべて出します。">
+<button class="go" id="gRun" disabled>この店にあるか調べる</button>
+<button class="stop" id="gStop" disabled>中止</button>
+<button id="gNext" disabled>次のページ</button>
+<label class="sw" id="swGHit"><input type="checkbox" id="gOnly">見つかった分だけ</label>
+<button id="gCsv">CSV</button>
+</div>
+</div>
 <div id="bar"><div></div></div>
 <div id="stat" class="mono">アーティスト名を入れて検索してください</div>
 <div id="sum" class="mono"></div>
@@ -927,7 +1188,9 @@ const SORD={stock:0,sold:1,none:2,error:3};
 let ART=null;          // 選んだアーティスト {id,name}
 let ROWS=[];           // 作品一覧
 let ST={};             // rgid -> 在庫チェック結果
-let RUNNING=false, TIMER=null;
+let RUNNING=false, TIMER=null, RUNMODE='cd';
+let TAB='artist';
+let GROWS=[], GST={}, GLINKS=[], CRUMB=[], GNEXT=null;   // ジャンルで探す側
 let SORT={k:'date',d:-1};
 
 const yen=n=>n==null?'':'¥'+Number(n).toLocaleString('ja-JP');
@@ -1008,6 +1271,7 @@ function th(k,label){
     (SORT.k===k?'<span class="ar">'+(SORT.d>0?'▲':'▼')+'</span>':'')+'</th>';
 }
 function render(){
+  if(TAB==='genre') return renderGenre();
   const rows=visible();
   if(!ROWS.length){
     $('#view').innerHTML='<div class="empty"><span class="big">'+
@@ -1042,6 +1306,7 @@ function schedule(){         // しぼり込み中は並びが変わるのでま
   clearTimeout(TIMER); TIMER=setTimeout(render,400);
 }
 function summary(){
+  if(TAB==='genre') return gSummary();
   if(!ROWS.length){ $('#sum').textContent=''; return; }
   const vis=visible();
   const own=ROWS.filter(r=>r.owned).length;
@@ -1115,11 +1380,12 @@ async function startCheck(){
   if(!targets.length){ setStat('照会する作品がありません（未照会のみを外すと再照会できます）'); return; }
   if(targets.length>60&&!confirm(targets.length+'件を BOOKOFF に照会します。\n'+
      '相手のサイトに負担をかけないよう間隔を空けるので時間がかかります。よろしいですか？')) return;
-  const plan=await T.plan($('#bkName').value.trim()||ART.name,
-    targets.map(r=>({id:r.id,title:r.title})));
+  const plan=await T.plan({mode:'cd', artist:$('#bkName').value.trim()||ART.name,
+    items:targets.map(r=>({id:r.id,title:r.title}))});
   if(!plan.ok){ setStat('× '+plan.msg); return; }
   targets.forEach(r=>{ ST[r.id]={state:'checking'}; patch(r.id); });
-  RUNNING=true; $('#bRun').disabled=true; $('#bStop').disabled=false;
+  RUNMODE='cd'; RUNNING=true;
+  $('#bRun').disabled=true; $('#bStop').disabled=false;
   $('#bar').classList.add('on'); $('#bar div').style.width='0%';
   T.start();
 }
@@ -1130,7 +1396,10 @@ function __event(kind,d){
     $('#bar div').style.width=(d.total?d.done/d.total*100:0)+'%';
     setStat(d.done+' / '+d.total+' 件（並列 '+d.workers+'）');
   }
-  else if(kind==='row'){ ST[d.id]=d; patch(d.id); }
+  else if(kind==='row'){
+    if(RUNMODE==='store'){ GST[d.id]=d; patchGenre(d.id); }
+    else { ST[d.id]=d; patch(d.id); }
+  }
   else if(kind==='end'){ stopUi(); render(); }
   else if(kind==='lost'){ if(RUNNING) setStat('接続が切れました'); stopUi(); }
 }
@@ -1138,8 +1407,11 @@ function stopUi(){
   RUNNING=false;
   T.stopStream();
   $('#bRun').disabled=!ART; $('#bStop').disabled=true;
+  $('#gRun').disabled=!GROWS.length; $('#gStop').disabled=true;
+  $('#gNext').disabled=!GNEXT;
   $('#bar').classList.remove('on');
   Object.keys(ST).forEach(k=>{ if(ST[k].state==='checking') delete ST[k]; });
+  Object.keys(GST).forEach(k=>{ if(GST[k].state==='checking') delete GST[k]; });
 }
 async function stopCheck(){
   await T.cancel();
@@ -1158,6 +1430,142 @@ function csv(){
                 s.price!=null?s.price:'',s.name||'',s.url||''].map(q).join(','));
   });
   T.csv(lines.join('\r\n'),(ART?ART.name:'cd')+'_bookoff.csv');
+}
+
+/* ── ジャンルで探す ───────────────────────────── */
+/* 分類の URL の形は決め打ちせず、サイトのリンクを辿る。
+   サイトの作りが変わっても、リンクが並んでいる限り潜れる。 */
+async function explore(url,label){
+  setStat('読み込んでいます…');
+  let d;
+  try{ d=await T.explore(url); }catch(e){ setStat('× 通信エラー: '+e); return; }
+  if(!d.ok){ setStat('× '+d.msg); return; }
+  if(label!==null) CRUMB.push({label:label||'BOOKOFF',url:url});
+  GLINKS=d.links||[]; GNEXT=d.next||null;
+  GROWS=d.items||[]; GST={};
+  setStat(GROWS.length?('商品 '+GROWS.length+'件／下の分類 '+GLINKS.length+'件'):
+    (GLINKS.length?('分類 '+GLINKS.length+'件。選んで潜ってください'):
+      'このページからは分類も商品も拾えませんでした（診断を見てください）'));
+  renderGenre();
+}
+async function gMore(){                 /* 次のページの商品を足す */
+  if(!GNEXT) return;
+  const url=GNEXT;
+  setStat('次のページを読み込んでいます…');
+  let d;
+  try{ d=await T.explore(url); }catch(e){ setStat('× 通信エラー: '+e); return; }
+  if(!d.ok){ setStat('× '+d.msg); return; }
+  const have={}; GROWS.forEach(r=>have[r.pid]=1);
+  (d.items||[]).forEach(r=>{ if(!have[r.pid]) GROWS.push(r); });
+  GNEXT=d.next||null;
+  if(CRUMB.length) CRUMB[CRUMB.length-1].url=url;
+  setStat('商品 '+GROWS.length+'件');
+  renderGenre();
+}
+function gVisible(){
+  return $('#gOnly').checked
+    ? GROWS.filter(r=>(GST[r.pid]||{}).state==='stock') : GROWS;
+}
+function gStock(r){
+  const s=GST[r.pid];
+  if(!s) return ['dim','—'];
+  if(s.state==='stock') return ['ok','○ あり'];
+  if(s.state==='none') return ['no','× なし'];
+  if(s.state==='error') return ['no','! '+esc(s.note||'エラー')];
+  if(s.state==='checking') return ['dim','照会中…'];
+  return ['dim','—'];
+}
+function gRowHtml(r){
+  const s=GST[r.pid]||{}, st=gStock(r);
+  const shops=(s.shops||[]).map(x=>'<span class="hit">'+esc(x)+'</span>').join('<br>');
+  const note=(!shops&&s.state==='none'&&s.all)?('他 '+s.all+' 店に在庫'):'';
+  return '<tr data-id="'+esc(r.pid)+'">'+
+    '<td class="ti"><a href="'+esc(r.url)+'"'+LT+'>'+esc(r.title)+'</a>'+
+      (r.new?'<span class="sub">新品</span>':'')+
+      (r.soldout?'<span class="sub">通販は品切れ</span>':'')+'</td>'+
+    '<td class="pr mono">'+(r.price!=null?yen(r.price):'')+'</td>'+
+    '<td class="st '+st[0]+'">'+st[1]+'</td>'+
+    '<td class="sh">'+(shops||note)+'</td></tr>';
+}
+function renderGenre(){
+  $('#gcands').innerHTML=GLINKS.map((g,i)=>
+    '<div class="chip" data-i="'+i+'">'+esc(g.label)+'</div>').join('');
+  $('#crumb').innerHTML=CRUMB.length
+    ? CRUMB.map(c=>'<b>'+esc(c.label)+'</b>').join('<span class="sep">›</span>') : '';
+  $('#gBack').disabled=CRUMB.length<2;
+  $('#gNext').disabled=!GNEXT||RUNNING;
+  $('#gRun').disabled=!GROWS.length||RUNNING;
+  const rows=gVisible();
+  if(!GROWS.length){
+    $('#view').innerHTML='<div class="empty"><span class="big">'+
+      'ジャンルをたどって探す</span>'+
+      '「BOOKOFF のトップから」を押して、DVD → サブジャンル と潜ってください。<br>'+
+      '商品が並んだら、店舗名の一部（例: 町田）を入れて<br>'+
+      'その店にあるものだけを絞り込めます。</div>';
+    gSummary(); return;
+  }
+  if(!rows.length){
+    $('#view').innerHTML='<div class="empty">その店にあった商品はまだありません。</div>';
+    gSummary(); return;
+  }
+  $('#view').innerHTML='<div class="tw"><table><thead><tr>'+
+    '<th>商品</th><th>価格</th><th>店舗</th><th>在庫のある店</th>'+
+    '</tr></thead><tbody>'+rows.map(gRowHtml).join('')+'</tbody></table></div>';
+  gSummary();
+}
+function patchGenre(pid){
+  const tr=document.querySelector('tr[data-id="'+CSS.escape(pid)+'"]');
+  if(!tr){ schedule(); return; }
+  const r=GROWS.find(x=>x.pid===pid); if(!r) return;
+  const s=GST[pid]||{}, st=gStock(r);
+  const c=tr.querySelector('.st'); c.className='st '+st[0]; c.innerHTML=st[1];
+  const shops=(s.shops||[]).map(x=>'<span class="hit">'+esc(x)+'</span>').join('<br>');
+  const note=(!shops&&s.state==='none'&&s.all)?('他 '+s.all+' 店に在庫'):'';
+  tr.querySelector('.sh').innerHTML=shops||note;
+  if($('#gOnly').checked) schedule();
+  gSummary();
+}
+function gSummary(){
+  if(!GROWS.length){ $('#sum').textContent=''; return; }
+  const hit=GROWS.filter(r=>(GST[r.pid]||{}).state==='stock');
+  const sum=hit.reduce((a,r)=>a+(r.price||0),0);
+  $('#sum').innerHTML='商品<b>'+GROWS.length+'</b>件<span class="sep">|</span>'+
+    'この店にあり<b>'+hit.length+'</b>件'+(sum?'（合計 '+yen(sum)+'）':'')+
+    (GNEXT?'<span class="sep">|</span>次のページあり':'');
+}
+async function gStart(){
+  if(RUNNING||!GROWS.length) return;
+  const store=$('#gStore').value.trim();
+  const rest=GROWS.filter(r=>!GST[r.pid]);
+  const list=rest.length?rest:GROWS;
+  if(list.length>60&&!confirm(list.length+'件の商品ページを開いて在庫店舗を調べます。\n'+
+     '相手のサイトに負担をかけないよう間隔を空けるので時間がかかります。よろしいですか？')) return;
+  const plan=await T.plan({mode:'store', store:store,
+    items:list.map(r=>({id:r.pid,title:r.title}))});
+  if(!plan.ok){ setStat('× '+plan.msg); return; }
+  list.forEach(r=>{ GST[r.pid]={state:'checking'}; patchGenre(r.pid); });
+  RUNMODE='store'; RUNNING=true;
+  $('#gRun').disabled=true; $('#gStop').disabled=false; $('#gNext').disabled=true;
+  $('#bar').classList.add('on'); $('#bar div').style.width='0%';
+  T.start();
+}
+function gCsv(){
+  const q=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
+  const lines=[['商品名','価格','通販','店舗','在庫のある店','URL'].map(q).join(',')];
+  gVisible().forEach(r=>{
+    const s=GST[r.pid]||{};
+    const st={stock:'あり',none:'なし',error:'エラー'}[s.state]||'未照会';
+    lines.push([r.title,r.price!=null?r.price:'',r.soldout?'品切れ':'在庫あり',
+                st,(s.shops||[]).join(' / '),r.url].map(q).join(','));
+  });
+  T.csv(lines.join('\r\n'),'bookoff_genre.csv');
+}
+function switchTab(t){
+  TAB=t;
+  document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));
+  $('#panArtist').hidden=(t!=='artist');
+  $('#panGenre').hidden=(t!=='genre');
+  render();
 }
 
 /* ── 配線 ────────────────────────────────── */
@@ -1189,6 +1597,30 @@ $('#q').addEventListener('input',schedule);
 $('#bRun').onclick=startCheck;
 $('#bStop').onclick=stopCheck;
 $('#bCsv').onclick=csv;
+document.querySelectorAll('.tab').forEach(e=>
+  e.addEventListener('click',()=>{ if(!RUNNING) switchTab(e.dataset.t); }));
+$('#gTop').onclick=()=>{ CRUMB=[]; explore('https://shopping.bookoff.co.jp/','BOOKOFF'); };
+$('#gBack').onclick=()=>{
+  if(CRUMB.length<2) return;
+  CRUMB.pop();
+  const c=CRUMB.pop();
+  explore(c.url,c.label);
+};
+$('#gGo').onclick=()=>{
+  const u=$('#gUrl').value.trim();
+  if(u) explore(u,'指定のページ');
+};
+$('#gcands').addEventListener('click',e=>{
+  const c=e.target.closest('.chip'); if(!c||RUNNING) return;
+  const g=GLINKS[+c.dataset.i]; if(g) explore(g.url,g.label);
+});
+$('#gRun').onclick=gStart;
+$('#gStop').onclick=stopCheck;
+$('#gNext').onclick=gMore;
+$('#gOnly').addEventListener('change',()=>{
+  $('#swGHit').classList.toggle('on',$('#gOnly').checked); renderGenre();
+});
+$('#gCsv').onclick=gCsv;
 $('#bDiag').onclick=()=>T.diag(
   ($('#bkName').value.trim()+' '+(ROWS[0]?ROWS[0].title:'')).trim());
 render();
@@ -1204,7 +1636,9 @@ const T={
   disco:async mbid=>(await fetch('/api/discography?mbid='+
     encodeURIComponent(mbid))).json(),
   setOwned:(id,owned,meta)=>_post('/api/owned',{id:id,owned:owned,meta:meta}),
-  plan:(artist,items)=>_post('/api/plan',{artist:artist,items:items}),
+  plan:o=>_post('/api/plan',o),
+  explore:async url=>(await fetch('/api/explore?url='+
+    encodeURIComponent(url))).json(),
   start(){
     ES=new EventSource('/run');
     ['status','progress','row','end'].forEach(k=>

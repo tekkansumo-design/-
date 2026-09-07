@@ -112,6 +112,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun explore(rid: Int, url: String) {
+            bg { reply(rid, Catalog.explore(url)) }
+        }
+
+        @JavascriptInterface
         fun setOwned(id: String, owned: Boolean, metaJson: String): String {
             val meta = try {
                 JSONObject(metaJson)
@@ -122,27 +127,32 @@ class MainActivity : AppCompatActivity() {
             return JSONObject().put("ok", true).put("count", n).toString()
         }
 
+        /** これから調べる対象を預ける。{mode, artist, store, items} を受ける。 */
         @JavascriptInterface
-        fun plan(artist: String, itemsJson: String): String {
+        fun plan(optsJson: String): String {
             if (Checker.running) {
                 return JSONObject().put("ok", false).put("msg", "実行中です").toString()
             }
-            val arr = try {
-                JSONArray(itemsJson)
+            val o = try {
+                JSONObject(optsJson)
             } catch (e: Exception) {
-                JSONArray()
+                JSONObject()
             }
+            val arr = o.optJSONArray("items") ?: JSONArray()
             val items = ArrayList<Target>()
             for (i in 0 until arr.length()) {
-                val o = arr.optJSONObject(i) ?: continue
-                val id = o.optString("id", "")
+                val it = arr.optJSONObject(i) ?: continue
+                val id = it.optString("id", "")
                 if (id.isEmpty()) continue
-                items.add(Target(id, o.optString("title", "")))
+                items.add(Target(id, it.optString("title", "")))
             }
             if (items.isEmpty()) {
                 return JSONObject().put("ok", false).put("msg", "対象がありません").toString()
             }
-            val n = Checker.setPlan(artist, items)
+            val n = Checker.setPlan(
+                o.optString("artist", ""), items,
+                o.optString("mode", "cd"), o.optString("store", "")
+            )
             return JSONObject().put("ok", true).put("count", n).toString()
         }
 

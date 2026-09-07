@@ -35,8 +35,17 @@ input[type=checkbox]{width:auto;accent-color:var(--hit)}
 white-space:nowrap;margin:0;cursor:pointer;user-select:none}
 .sw.on{color:var(--hit)}
 .filt{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:8px}
-#cands{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
-#cands:empty{display:none}
+.tabs{display:flex;gap:4px;margin:0 0 8px}
+.tab{padding:6px 14px;border-radius:6px 6px 0 0;font-size:12px;cursor:pointer;
+color:var(--dim);border:1px solid transparent;border-bottom:none;user-select:none}
+.tab.on{background:var(--bg);color:var(--hit);border-color:var(--line)}
+#cands,#gcands{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+#cands:empty,#gcands:empty{display:none}
+#crumb{margin-top:7px;font-size:11px;color:var(--dim);line-height:1.7}
+#crumb b{color:var(--hit);font-weight:700}
+#crumb .sep{opacity:.4;margin:0 5px}
+td.sh{font-size:12px;line-height:1.6;min-width:150px;word-break:break-word}
+td.sh .hit{color:var(--ok);font-weight:700}
 .chip{border:1px solid var(--line);border-radius:13px;padding:4px 11px;font-size:12px;
 cursor:pointer;color:var(--dim);background:var(--chip);line-height:1.5}
 .chip:hover{border-color:var(--hit);color:var(--ink)}
@@ -94,7 +103,12 @@ opacity:0;transition:opacity .2s;pointer-events:none;z-index:20}
 .saved.on{opacity:1}
 </style></head><body>
 <header>
-<h1>アーティストCDリスト × BOOKOFF オンライン</h1>
+<h1>CDリスト × BOOKOFF オンライン</h1>
+<div class="tabs">
+<div class="tab on" data-t="artist">アーティストで探す</div>
+<div class="tab" data-t="genre">ジャンルで探す</div>
+</div>
+<div id="panArtist">
 <div class="row">
 <input type="text" id="artist" placeholder="アーティスト名（例: 宇多田ヒカル）">
 <button class="go" id="bFind">アーティスト検索</button>
@@ -123,6 +137,28 @@ opacity:0;transition:opacity .2s;pointer-events:none;z-index:20}
 <button id="bCsv">CSV</button>
 <button id="bDiag">診断</button>
 </div>
+</div>
+
+<div id="panGenre" hidden>
+<div class="row">
+<button id="gTop">BOOKOFF のトップから</button>
+<button id="gBack" disabled>ひとつ戻る</button>
+<input type="text" id="gUrl" placeholder="BOOKOFF のページの URL を直接貼ってもよい">
+<button id="gGo">開く</button>
+</div>
+<div id="crumb"></div>
+<div id="gcands"></div>
+<div class="row" style="margin-top:8px">
+<input type="text" id="gStore" style="max-width:200px"
+ placeholder="店舗名の一部（例: 町田）"
+ title="空のままだと在庫のある店をすべて出します。">
+<button class="go" id="gRun" disabled>この店にあるか調べる</button>
+<button class="stop" id="gStop" disabled>中止</button>
+<button id="gNext" disabled>次のページ</button>
+<label class="sw" id="swGHit"><input type="checkbox" id="gOnly">見つかった分だけ</label>
+<button id="gCsv">CSV</button>
+</div>
+</div>
 <div id="bar"><div></div></div>
 <div id="stat" class="mono">アーティスト名を入れて検索してください</div>
 <div id="sum" class="mono"></div>
@@ -140,8 +176,9 @@ const ask=(fn,arg)=>new Promise(r=>{ const id=++RQ; PEND[id]=r; App[fn](id,arg);
 const T={
   artists:q=>ask('artists',q),
   disco:m=>ask('disco',m),
+  explore:u=>ask('explore',u),
   setOwned:async(id,owned,meta)=>JSON.parse(App.setOwned(id,owned,JSON.stringify(meta))),
-  plan:async(artist,items)=>JSON.parse(App.plan(artist,JSON.stringify(items))),
+  plan:async o=>JSON.parse(App.plan(JSON.stringify(o))),
   start:()=>App.start(),
   stopStream(){},          // アプリでは張りっぱなしの接続が無い
   cancel:async()=>App.cancel(),
@@ -170,7 +207,9 @@ const SORD={stock:0,sold:1,none:2,error:3};
 let ART=null;          // 選んだアーティスト {id,name}
 let ROWS=[];           // 作品一覧
 let ST={};             // rgid -> 在庫チェック結果
-let RUNNING=false, TIMER=null;
+let RUNNING=false, TIMER=null, RUNMODE='cd';
+let TAB='artist';
+let GROWS=[], GST={}, GLINKS=[], CRUMB=[], GNEXT=null;   // ジャンルで探す側
 let SORT={k:'date',d:-1};
 
 const yen=n=>n==null?'':'¥'+Number(n).toLocaleString('ja-JP');
@@ -251,6 +290,7 @@ function th(k,label){
     (SORT.k===k?'<span class="ar">'+(SORT.d>0?'▲':'▼')+'</span>':'')+'</th>';
 }
 function render(){
+  if(TAB==='genre') return renderGenre();
   const rows=visible();
   if(!ROWS.length){
     $('#view').innerHTML='<div class="empty"><span class="big">'+
@@ -285,6 +325,7 @@ function schedule(){         // しぼり込み中は並びが変わるのでま
   clearTimeout(TIMER); TIMER=setTimeout(render,400);
 }
 function summary(){
+  if(TAB==='genre') return gSummary();
   if(!ROWS.length){ $('#sum').textContent=''; return; }
   const vis=visible();
   const own=ROWS.filter(r=>r.owned).length;
@@ -358,11 +399,12 @@ async function startCheck(){
   if(!targets.length){ setStat('照会する作品がありません（未照会のみを外すと再照会できます）'); return; }
   if(targets.length>60&&!confirm(targets.length+'件を BOOKOFF に照会します。\n'+
      '相手のサイトに負担をかけないよう間隔を空けるので時間がかかります。よろしいですか？')) return;
-  const plan=await T.plan($('#bkName').value.trim()||ART.name,
-    targets.map(r=>({id:r.id,title:r.title})));
+  const plan=await T.plan({mode:'cd', artist:$('#bkName').value.trim()||ART.name,
+    items:targets.map(r=>({id:r.id,title:r.title}))});
   if(!plan.ok){ setStat('× '+plan.msg); return; }
   targets.forEach(r=>{ ST[r.id]={state:'checking'}; patch(r.id); });
-  RUNNING=true; $('#bRun').disabled=true; $('#bStop').disabled=false;
+  RUNMODE='cd'; RUNNING=true;
+  $('#bRun').disabled=true; $('#bStop').disabled=false;
   $('#bar').classList.add('on'); $('#bar div').style.width='0%';
   T.start();
 }
@@ -373,7 +415,10 @@ function __event(kind,d){
     $('#bar div').style.width=(d.total?d.done/d.total*100:0)+'%';
     setStat(d.done+' / '+d.total+' 件（並列 '+d.workers+'）');
   }
-  else if(kind==='row'){ ST[d.id]=d; patch(d.id); }
+  else if(kind==='row'){
+    if(RUNMODE==='store'){ GST[d.id]=d; patchGenre(d.id); }
+    else { ST[d.id]=d; patch(d.id); }
+  }
   else if(kind==='end'){ stopUi(); render(); }
   else if(kind==='lost'){ if(RUNNING) setStat('接続が切れました'); stopUi(); }
 }
@@ -381,8 +426,11 @@ function stopUi(){
   RUNNING=false;
   T.stopStream();
   $('#bRun').disabled=!ART; $('#bStop').disabled=true;
+  $('#gRun').disabled=!GROWS.length; $('#gStop').disabled=true;
+  $('#gNext').disabled=!GNEXT;
   $('#bar').classList.remove('on');
   Object.keys(ST).forEach(k=>{ if(ST[k].state==='checking') delete ST[k]; });
+  Object.keys(GST).forEach(k=>{ if(GST[k].state==='checking') delete GST[k]; });
 }
 async function stopCheck(){
   await T.cancel();
@@ -401,6 +449,142 @@ function csv(){
                 s.price!=null?s.price:'',s.name||'',s.url||''].map(q).join(','));
   });
   T.csv(lines.join('\r\n'),(ART?ART.name:'cd')+'_bookoff.csv');
+}
+
+/* ── ジャンルで探す ───────────────────────────── */
+/* 分類の URL の形は決め打ちせず、サイトのリンクを辿る。
+   サイトの作りが変わっても、リンクが並んでいる限り潜れる。 */
+async function explore(url,label){
+  setStat('読み込んでいます…');
+  let d;
+  try{ d=await T.explore(url); }catch(e){ setStat('× 通信エラー: '+e); return; }
+  if(!d.ok){ setStat('× '+d.msg); return; }
+  if(label!==null) CRUMB.push({label:label||'BOOKOFF',url:url});
+  GLINKS=d.links||[]; GNEXT=d.next||null;
+  GROWS=d.items||[]; GST={};
+  setStat(GROWS.length?('商品 '+GROWS.length+'件／下の分類 '+GLINKS.length+'件'):
+    (GLINKS.length?('分類 '+GLINKS.length+'件。選んで潜ってください'):
+      'このページからは分類も商品も拾えませんでした（診断を見てください）'));
+  renderGenre();
+}
+async function gMore(){                 /* 次のページの商品を足す */
+  if(!GNEXT) return;
+  const url=GNEXT;
+  setStat('次のページを読み込んでいます…');
+  let d;
+  try{ d=await T.explore(url); }catch(e){ setStat('× 通信エラー: '+e); return; }
+  if(!d.ok){ setStat('× '+d.msg); return; }
+  const have={}; GROWS.forEach(r=>have[r.pid]=1);
+  (d.items||[]).forEach(r=>{ if(!have[r.pid]) GROWS.push(r); });
+  GNEXT=d.next||null;
+  if(CRUMB.length) CRUMB[CRUMB.length-1].url=url;
+  setStat('商品 '+GROWS.length+'件');
+  renderGenre();
+}
+function gVisible(){
+  return $('#gOnly').checked
+    ? GROWS.filter(r=>(GST[r.pid]||{}).state==='stock') : GROWS;
+}
+function gStock(r){
+  const s=GST[r.pid];
+  if(!s) return ['dim','—'];
+  if(s.state==='stock') return ['ok','○ あり'];
+  if(s.state==='none') return ['no','× なし'];
+  if(s.state==='error') return ['no','! '+esc(s.note||'エラー')];
+  if(s.state==='checking') return ['dim','照会中…'];
+  return ['dim','—'];
+}
+function gRowHtml(r){
+  const s=GST[r.pid]||{}, st=gStock(r);
+  const shops=(s.shops||[]).map(x=>'<span class="hit">'+esc(x)+'</span>').join('<br>');
+  const note=(!shops&&s.state==='none'&&s.all)?('他 '+s.all+' 店に在庫'):'';
+  return '<tr data-id="'+esc(r.pid)+'">'+
+    '<td class="ti"><a href="'+esc(r.url)+'"'+LT+'>'+esc(r.title)+'</a>'+
+      (r.new?'<span class="sub">新品</span>':'')+
+      (r.soldout?'<span class="sub">通販は品切れ</span>':'')+'</td>'+
+    '<td class="pr mono">'+(r.price!=null?yen(r.price):'')+'</td>'+
+    '<td class="st '+st[0]+'">'+st[1]+'</td>'+
+    '<td class="sh">'+(shops||note)+'</td></tr>';
+}
+function renderGenre(){
+  $('#gcands').innerHTML=GLINKS.map((g,i)=>
+    '<div class="chip" data-i="'+i+'">'+esc(g.label)+'</div>').join('');
+  $('#crumb').innerHTML=CRUMB.length
+    ? CRUMB.map(c=>'<b>'+esc(c.label)+'</b>').join('<span class="sep">›</span>') : '';
+  $('#gBack').disabled=CRUMB.length<2;
+  $('#gNext').disabled=!GNEXT||RUNNING;
+  $('#gRun').disabled=!GROWS.length||RUNNING;
+  const rows=gVisible();
+  if(!GROWS.length){
+    $('#view').innerHTML='<div class="empty"><span class="big">'+
+      'ジャンルをたどって探す</span>'+
+      '「BOOKOFF のトップから」を押して、DVD → サブジャンル と潜ってください。<br>'+
+      '商品が並んだら、店舗名の一部（例: 町田）を入れて<br>'+
+      'その店にあるものだけを絞り込めます。</div>';
+    gSummary(); return;
+  }
+  if(!rows.length){
+    $('#view').innerHTML='<div class="empty">その店にあった商品はまだありません。</div>';
+    gSummary(); return;
+  }
+  $('#view').innerHTML='<div class="tw"><table><thead><tr>'+
+    '<th>商品</th><th>価格</th><th>店舗</th><th>在庫のある店</th>'+
+    '</tr></thead><tbody>'+rows.map(gRowHtml).join('')+'</tbody></table></div>';
+  gSummary();
+}
+function patchGenre(pid){
+  const tr=document.querySelector('tr[data-id="'+CSS.escape(pid)+'"]');
+  if(!tr){ schedule(); return; }
+  const r=GROWS.find(x=>x.pid===pid); if(!r) return;
+  const s=GST[pid]||{}, st=gStock(r);
+  const c=tr.querySelector('.st'); c.className='st '+st[0]; c.innerHTML=st[1];
+  const shops=(s.shops||[]).map(x=>'<span class="hit">'+esc(x)+'</span>').join('<br>');
+  const note=(!shops&&s.state==='none'&&s.all)?('他 '+s.all+' 店に在庫'):'';
+  tr.querySelector('.sh').innerHTML=shops||note;
+  if($('#gOnly').checked) schedule();
+  gSummary();
+}
+function gSummary(){
+  if(!GROWS.length){ $('#sum').textContent=''; return; }
+  const hit=GROWS.filter(r=>(GST[r.pid]||{}).state==='stock');
+  const sum=hit.reduce((a,r)=>a+(r.price||0),0);
+  $('#sum').innerHTML='商品<b>'+GROWS.length+'</b>件<span class="sep">|</span>'+
+    'この店にあり<b>'+hit.length+'</b>件'+(sum?'（合計 '+yen(sum)+'）':'')+
+    (GNEXT?'<span class="sep">|</span>次のページあり':'');
+}
+async function gStart(){
+  if(RUNNING||!GROWS.length) return;
+  const store=$('#gStore').value.trim();
+  const rest=GROWS.filter(r=>!GST[r.pid]);
+  const list=rest.length?rest:GROWS;
+  if(list.length>60&&!confirm(list.length+'件の商品ページを開いて在庫店舗を調べます。\n'+
+     '相手のサイトに負担をかけないよう間隔を空けるので時間がかかります。よろしいですか？')) return;
+  const plan=await T.plan({mode:'store', store:store,
+    items:list.map(r=>({id:r.pid,title:r.title}))});
+  if(!plan.ok){ setStat('× '+plan.msg); return; }
+  list.forEach(r=>{ GST[r.pid]={state:'checking'}; patchGenre(r.pid); });
+  RUNMODE='store'; RUNNING=true;
+  $('#gRun').disabled=true; $('#gStop').disabled=false; $('#gNext').disabled=true;
+  $('#bar').classList.add('on'); $('#bar div').style.width='0%';
+  T.start();
+}
+function gCsv(){
+  const q=s=>'"'+String(s==null?'':s).replace(/"/g,'""')+'"';
+  const lines=[['商品名','価格','通販','店舗','在庫のある店','URL'].map(q).join(',')];
+  gVisible().forEach(r=>{
+    const s=GST[r.pid]||{};
+    const st={stock:'あり',none:'なし',error:'エラー'}[s.state]||'未照会';
+    lines.push([r.title,r.price!=null?r.price:'',r.soldout?'品切れ':'在庫あり',
+                st,(s.shops||[]).join(' / '),r.url].map(q).join(','));
+  });
+  T.csv(lines.join('\r\n'),'bookoff_genre.csv');
+}
+function switchTab(t){
+  TAB=t;
+  document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));
+  $('#panArtist').hidden=(t!=='artist');
+  $('#panGenre').hidden=(t!=='genre');
+  render();
 }
 
 /* ── 配線 ────────────────────────────────── */
@@ -432,6 +616,30 @@ $('#q').addEventListener('input',schedule);
 $('#bRun').onclick=startCheck;
 $('#bStop').onclick=stopCheck;
 $('#bCsv').onclick=csv;
+document.querySelectorAll('.tab').forEach(e=>
+  e.addEventListener('click',()=>{ if(!RUNNING) switchTab(e.dataset.t); }));
+$('#gTop').onclick=()=>{ CRUMB=[]; explore('https://shopping.bookoff.co.jp/','BOOKOFF'); };
+$('#gBack').onclick=()=>{
+  if(CRUMB.length<2) return;
+  CRUMB.pop();
+  const c=CRUMB.pop();
+  explore(c.url,c.label);
+};
+$('#gGo').onclick=()=>{
+  const u=$('#gUrl').value.trim();
+  if(u) explore(u,'指定のページ');
+};
+$('#gcands').addEventListener('click',e=>{
+  const c=e.target.closest('.chip'); if(!c||RUNNING) return;
+  const g=GLINKS[+c.dataset.i]; if(g) explore(g.url,g.label);
+});
+$('#gRun').onclick=gStart;
+$('#gStop').onclick=stopCheck;
+$('#gNext').onclick=gMore;
+$('#gOnly').addEventListener('change',()=>{
+  $('#swGHit').classList.toggle('on',$('#gOnly').checked); renderGenre();
+});
+$('#gCsv').onclick=gCsv;
 $('#bDiag').onclick=()=>T.diag(
   ($('#bkName').value.trim()+' '+(ROWS[0]?ROWS[0].title:'')).trim());
 render();
