@@ -10,3 +10,5 @@ android/app/build/
 android/local.properties
 *.iml
 .idea/
+artist_cd_owned.json
+artist_cd_owned.tmp
