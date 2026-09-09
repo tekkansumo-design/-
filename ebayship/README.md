@@ -141,6 +141,38 @@ Gmail なら サーバ `imap.gmail.com` / ポート `993` / パスワードは
 | `MailFetcher.kt` | 通知メールを IMAP で読んでリンクと番号を取り出す |
 | `Db.kt` | 設定と注文の保存。秘密は EncryptedSharedPreferences |
 
+## PC 版
+
+同じ流れを PC のブラウザでやるものが、リポジトリ直下の `ebayship_web.py`。
+長い文字列を打つのが楽なので、最初の設定はこちらで済ませたほうが早い。
+
+```
+pip install flask requests
+python ebayship_web.py
+```
+
+→ http://localhost:5001 が開く。
+
+国際郵便マイページの自動入力まで任せたいときは追加で:
+
+```
+pip install playwright
+playwright install chromium
+```
+
+入れなくても動く。その場合はマイページを既定のブラウザで開き、
+入れる値を画面からコピーできる形で出す。
+
+入力欄を当てる JS（`app/src/main/assets/jp_fill.js`）は PC 版も同じものを読む。
+当て方を直すときはこのファイルを 1 か所直せば、Android 版と PC 版の両方に効く。
+
+設定と注文はスクリプトと同じ場所に JSON で置かれる
+（`ebayship_config.json` / `ebayship_orders.json` / `ebayship_jp_profile.json`）。
+Cert ID などもそこに入るので、公開リポジトリに混ぜないよう .gitignore してある。
+
+eBay の連携は、同意のあと飛ばされた先の URL をまるごと貼る方式。
+飛び先が表示できなくてもかまわない。URL に付いてくる認可コードだけ使う。
+
 ## 手元での確認
 
 Android SDK が無くても、構文だけなら kotlinc で見られる。

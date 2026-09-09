@@ -161,7 +161,7 @@ class JpPostActivity : AppCompatActivity() {
     }
 
     private fun inject(then: () -> Unit) {
-        web.evaluateJavascript(JpPostScript.JS) { then() }
+        web.evaluateJavascript(JpPostScript.js(this)) { then() }
     }
 
     /** ページが変わるたびに呼ぶ。ログイン画面ならログイン、それ以外なら入力。 */

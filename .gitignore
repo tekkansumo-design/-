@@ -8,5 +8,15 @@ android/.gradle/
 android/build/
 android/app/build/
 android/local.properties
+ebayship/.gradle/
+ebayship/build/
+ebayship/app/build/
+ebayship/local.properties
 *.iml
 .idea/
+
+# PC 版が作る設定と注文の控え。Cert ID などが入るので追跡しない
+ebayship_config.json
+ebayship_orders.json
+ebayship_jp_profile.json
+ebayship_browser/
