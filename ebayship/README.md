@@ -170,6 +170,12 @@ playwright install chromium
 （`ebayship_config.json` / `ebayship_orders.json` / `ebayship_jp_profile.json`）。
 Cert ID などもそこに入るので、公開リポジトリに混ぜないよう .gitignore してある。
 
+鍵の打ち込みは、設定の **eBay の管理画面を開く** → 自分でログイン →
+**この画面から読み取る** で済ませられる。画面に出ている文字の形だけを見て
+App ID / Cert ID / RuName を拾うので、相手の作りが変わっても壊れにくい。
+Cert ID が伏せ字の画面では拾えないので、表示してから押す。
+ログインは本人がするので、パスワードはどこにも渡らない。
+
 eBay の連携は、同意のあと飛ばされた先の URL をまるごと貼る方式。
 飛び先が表示できなくてもかまわない。URL に付いてくる認可コードだけ使う。
 

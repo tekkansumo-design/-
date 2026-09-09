@@ -688,6 +688,59 @@ def attach_qr_mails(order_id=""):
     return n
 
 
+# ═══════════════════════════════════════════════ eBay の管理画面から読み取る
+
+# 鍵は形が決まっているので、画面のどこにあっても文字の形で見分けられる。
+# 相手の DOM に頼ると作りが変わるたびに壊れるので、文字だけを見る。
+RE_APP_ID = re.compile(r"\b[A-Za-z0-9]+-[A-Za-z0-9]+-(?:SBX|PRD)-[0-9a-f]{6,}-[0-9a-f]{6,}\b")
+RE_CERT_ID = re.compile(
+    r"\b(?:SBX|PRD)-[0-9a-f]{8,}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4,}\b")
+RE_DEV_ID = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
+# RuName は Bob_Smith-BobSmit-Test-abcdefg のような形。下線を含むのが目印。
+# 区切りの長さは決まっていない（2 文字のこともある）ので幅を持たせる。
+RE_RUNAME = re.compile(
+    r"\b[A-Za-z0-9]+_[A-Za-z0-9]+(?:-[A-Za-z0-9]{1,16}){2,4}\b")
+
+EBAY_KEYS_URL = "https://developer.ebay.com/my/keys"
+
+
+def scrape_keys(text):
+    """
+    developer.ebay.com の画面から拾える文字を見て、鍵らしきものを取り出す。
+    見つからなかったものは入れない。
+    """
+    found = {}
+    m = RE_APP_ID.search(text)
+    if m:
+        found["ebayClientId"] = m.group(0)
+    m = RE_CERT_ID.search(text)
+    if m:
+        found["ebayClientSecret"] = m.group(0)
+    for m in RE_RUNAME.finditer(text):
+        # App ID も似た形なので、そちらに当たるものは除く
+        if not RE_APP_ID.match(m.group(0)):
+            found["ebayRuName"] = m.group(0)
+            break
+    return found
+
+
+def page_all_text(page):
+    """本文の文字と、入力欄に入っている値の両方を集める。"""
+    parts = []
+    try:
+        parts.append(page.inner_text("body"))
+    except Exception:
+        pass
+    try:
+        parts.extend(page.eval_on_selector_all(
+            "input,textarea",
+            "els => els.map(e => (e.value || '') + ' ' + (e.placeholder || ''))"))
+    except Exception:
+        pass
+    return "\n".join(p for p in parts if p)
+
+
 # ═══════════════════════════════════════════════ 国際郵便マイページ
 
 
@@ -820,6 +873,11 @@ class Browser:
                     save_profile(key, f["field"], f["selector"])
             report["pageKey"] = key
             return report
+
+    def read_text(self):
+        """いま開いている画面の文字を集める。鍵を読み取るのに使う。"""
+        with self._lock:
+            return page_all_text(self.open())
 
     def describe(self):
         with self._lock:
@@ -1003,6 +1061,48 @@ def api_conf_import():
         return ng("読み取れる設定がありませんでした")
     return ok(conf=conf_for_ui(), env=env_name(),
               msg=f"{len(got)}項目を取り込みました")
+
+
+@app.route("/api/ebay/open", methods=["POST"])
+def api_ebay_open():
+    """eBay の管理画面をブラウザで開く。ログインは本人がする。"""
+    if not Browser.available():
+        webbrowser.open(EBAY_KEYS_URL)
+        return ok(manual=True,
+                  msg="eBay の画面を開きました。読み取りには Playwright が必要です")
+    try:
+        BROWSER_THREAD.call(lambda: BROWSER.goto(EBAY_KEYS_URL))
+        return ok(msg="eBay にログインし、鍵や RuName が見えている画面まで進んでから"
+                      "「この画面から読み取る」を押してください")
+    except Exception as e:
+        webbrowser.open(EBAY_KEYS_URL)
+        return ng(f"ブラウザを開けませんでした（{e}）")
+
+
+@app.route("/api/ebay/grab", methods=["POST"])
+def api_ebay_grab():
+    """
+    いま開いている eBay の画面から鍵と RuName を読み取って設定に入れる。
+    相手の作りに合わせず、文字の形だけで見分ける。
+    """
+    if not Browser.available():
+        return ng("Playwright が入っていないので読み取れません")
+    try:
+        text = BROWSER_THREAD.call(lambda: BROWSER.read_text())
+    except Exception as e:
+        return ng(e)
+
+    found = scrape_keys(text)
+    if not found:
+        return ng("この画面からは見つかりませんでした。"
+                  "Application Keys の画面か、User Tokens の画面を開いてから押してください"
+                  "（Cert ID は伏せ字のことがあるので、表示してから押してください）")
+    save_conf(found)
+    labels = {"ebayClientId": "App ID", "ebayClientSecret": "Cert ID",
+              "ebayRuName": "RuName"}
+    got = "、".join(labels[k] for k in found)
+    return ok(conf=conf_for_ui(), env=env_name(), found=list(found.keys()),
+              msg=f"{got} を読み取りました")
 
 
 @app.route("/api/consent")
@@ -1328,6 +1428,13 @@ RuName = ..."></textarea>
   <div class="row"><button onclick="importBulk()">取り込む</button></div>
 
   <div class="sect">eBay</div>
+  <div class="hint">developer.ebay.com を開いて、画面に出ている鍵をそのまま読み取れます。
+    ログインはあなた自身が行い、打ち込んだものはこの PC の外には出ません。</div>
+  <div class="row">
+    <button onclick="post('/api/ebay/open',{}).then(function(r){bar(r.msg||r.error,!r.ok)})">
+      eBay の管理画面を開く</button>
+    <button onclick="grabKeys()">この画面から読み取る</button>
+  </div>
   <label>App ID (Client ID)</label><input id="sClientId">
   <label>Cert ID (Client Secret)</label><input id="sClientSecret" type="password">
   <label>RuName (redirect_uri)</label><input id="sRuName">
@@ -1663,6 +1770,14 @@ function importBulk(){
   post("/api/conf/import", {text: t}).then(function(r){
     afterConf(r);
     if(r.ok) el.value = "";
+  });
+}
+
+function grabKeys(){
+  post("/api/ebay/grab", {}).then(function(r){
+    afterConf(r);
+    if(r.ok) bar(r.msg + "。足りないものは eBay 側で該当の画面を開いてから" +
+                 "もう一度押してください");
   });
 }
 
