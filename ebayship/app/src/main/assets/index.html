@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>eBay 発送管理</title>
+<style>
+  :root{
+    --bg:#16110d; --panel:#1d1710; --panel2:#241d15; --line:#2f2619;
+    --text:#f0e6da; --dim:#a08d78; --accent:#e0a458; --accent2:#c8862f;
+    --ok:#6fbf73; --bad:#e06c5f; --wait:#7aa7d8;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;
+       font-size:14px;line-height:1.6;padding-bottom:24px}
+  header{position:sticky;top:0;z-index:20;background:var(--panel);
+         border-bottom:1px solid var(--line);padding:12px 14px;
+         display:flex;align-items:center;gap:10px}
+  header h1{font-size:15px;margin:0;flex:1;color:var(--accent);font-weight:700}
+  button{font-family:inherit;font-size:13px;border-radius:8px;border:1px solid var(--line);
+         background:var(--panel2);color:var(--text);padding:8px 12px}
+  button:active{opacity:.6}
+  .primary{background:var(--accent);color:#231703;border-color:var(--accent);font-weight:700}
+  .ghost{background:transparent}
+  .bar{padding:8px 14px;font-size:12px;color:var(--dim);
+       background:var(--panel);border-bottom:1px solid var(--line);display:none}
+  .bar.on{display:block}
+  .bar.bad{color:var(--bad)}
+
+  .list{padding:10px 12px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+        padding:12px 14px;margin-bottom:10px}
+  .card .head{display:flex;gap:10px;align-items:flex-start}
+  .card .head > div{flex:1;min-width:0}
+  .date{font-size:11px;color:var(--dim);letter-spacing:.02em}
+  .title{font-size:14px;font-weight:700;margin-top:2px;
+         overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .meta{font-size:11px;color:var(--dim);margin-top:3px}
+  .badge{font-size:10px;padding:3px 8px;border-radius:999px;white-space:nowrap;
+         border:1px solid var(--line);color:var(--dim)}
+  .badge.new{color:var(--accent);border-color:var(--accent2)}
+  .badge.submitted{color:var(--wait);border-color:#3a4a5e}
+  .badge.qr{color:var(--ok);border-color:#3a5a3c}
+  .badge.shipped{color:var(--dim)}
+  .row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center}
+  .row button{flex:1;min-width:110px}
+  .track{flex:1;min-width:120px}
+
+  input,select,textarea{width:100%;background:var(--panel2);color:var(--text);
+        border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:14px;
+        font-family:inherit}
+  label{display:block;font-size:11px;color:var(--dim);margin:12px 0 4px}
+  .hint{font-size:11px;color:var(--dim);margin-top:4px}
+
+  .sheet{position:fixed;inset:0;background:var(--bg);z-index:30;overflow-y:auto;display:none}
+  .sheet.on{display:block}
+  .sheet header{background:var(--panel)}
+  .sheet .body{padding:14px 16px 40px}
+  .addr{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+        padding:12px 14px;font-size:13px;white-space:pre-wrap;line-height:1.7}
+  .sect{font-size:12px;color:var(--accent);font-weight:700;margin:22px 0 2px;
+        border-bottom:1px solid var(--line);padding-bottom:6px}
+  .empty{text-align:center;color:var(--dim);padding:60px 20px;font-size:13px}
+  .two{display:flex;gap:10px}
+  .two > div{flex:1}
+  .sticky{position:sticky;bottom:0;background:linear-gradient(180deg,transparent,var(--bg) 30%);
+          padding:16px 0 6px}
+  .sticky button{width:100%;padding:14px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>eBay 発送管理</h1>
+  <button class="ghost" onclick="openSettings()">設定</button>
+  <button class="primary" onclick="App.refresh()">更新</button>
+</header>
+
+<div id="bar" class="bar"></div>
+<div id="list" class="list"></div>
+
+<!-- 明細 -->
+<div id="detail" class="sheet">
+  <header>
+    <h1 id="dTitleHead">発送情報の入力</h1>
+    <button class="ghost" onclick="closeDetail()">閉じる</button>
+  </header>
+  <div class="body">
+    <div class="sect">商品</div>
+    <div id="dTitle" class="addr"></div>
+
+    <div class="sect">お届け先</div>
+    <div id="dAddr" class="addr"></div>
+
+    <div class="sect">内容品</div>
+    <label>商品内容（内容品の品名・英語で）</label>
+    <input id="fContent" placeholder="Used camera lens">
+    <div class="two">
+      <div>
+        <label>重量（g）</label>
+        <input id="fWeight" inputmode="numeric" placeholder="500">
+      </div>
+      <div>
+        <label>個数</label>
+        <input id="fQty" inputmode="numeric" placeholder="1">
+      </div>
+    </div>
+    <div class="two">
+      <div>
+        <label>HS コード</label>
+        <input id="fHs" inputmode="numeric" placeholder="9002.11">
+      </div>
+      <div>
+        <label>原産国</label>
+        <input id="fOrigin" placeholder="JP">
+      </div>
+    </div>
+    <label>商品金額</label>
+    <input id="fValue" inputmode="numeric" placeholder="8000">
+    <div class="hint" id="dPriceHint"></div>
+
+    <div class="sticky">
+      <button class="primary" onclick="submitDetail()">決定（マイページへ）</button>
+    </div>
+  </div>
+</div>
+
+<!-- 設定 -->
+<div id="settings" class="sheet">
+  <header>
+    <h1>設定</h1>
+    <button class="ghost" onclick="closeSettings()">閉じる</button>
+    <button class="primary" onclick="saveSettings()">保存</button>
+  </header>
+  <div class="body">
+    <div class="sect">eBay</div>
+    <label>環境</label>
+    <select id="sEnv"><option value="production">本番</option><option value="sandbox">サンドボックス</option></select>
+    <label>App ID (Client ID)</label><input id="sClientId" autocapitalize="off">
+    <label>Cert ID (Client Secret)</label><input id="sClientSecret" type="password" autocapitalize="off">
+    <label>RuName (redirect_uri)</label><input id="sRuName" autocapitalize="off">
+    <div class="row">
+      <button onclick="App.linkEbay()">eBay と連携する</button>
+      <button onclick="App.unlinkEbay()">連携を解除</button>
+    </div>
+    <div class="hint" id="sLinked"></div>
+    <label>配送業者コード（追跡番号の登録先）</label><input id="sCarrier" autocapitalize="off">
+
+    <div class="sect">国際郵便マイページ</div>
+    <label>ログイン ID</label><input id="sJpId" autocapitalize="off">
+    <label>パスワード</label><input id="sJpPw" type="password">
+    <label>開始 URL</label><input id="sJpUrl" autocapitalize="off">
+    <div class="row"><button onclick="App.resetJpProfile()">覚えた入力欄を消す</button></div>
+
+    <div class="sect">二次元コードのメール（IMAP）</div>
+    <label>サーバ</label><input id="sMailHost" autocapitalize="off">
+    <label>ポート</label><input id="sMailPort" inputmode="numeric">
+    <label>ユーザ（メールアドレス）</label><input id="sMailUser" autocapitalize="off">
+    <label>パスワード（Gmail はアプリパスワード）</label><input id="sMailPw" type="password">
+    <label>フォルダ</label><input id="sMailFolder" autocapitalize="off">
+    <label>件名に含まれる語</label><input id="sMailSubject">
+
+    <div class="sect">ご依頼主（送り状の差出人）</div>
+    <label>氏名</label><input id="sFromName">
+    <label>郵便番号</label><input id="sFromPostal" inputmode="numeric">
+    <label>住所</label><input id="sFromAddress">
+    <label>電話番号</label><input id="sFromPhone" inputmode="tel">
+
+    <div class="sect">内容品の初期値</div>
+    <label>HS コード</label><input id="sDefHs" inputmode="numeric">
+    <label>原産国</label><input id="sDefOrigin">
+    <label>重量（g）</label><input id="sDefWeight" inputmode="numeric">
+
+    <div class="sticky">
+      <button class="primary" onclick="saveSettings()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var orders = [];
+var current = null;
+var settings = {};
+
+function esc(s){
+  return String(s == null ? "" : s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+function jst(iso){
+  if(!iso) return "";
+  var d = new Date(iso);
+  if(isNaN(d.getTime())) return iso;
+  var p = function(n){ return (n<10?"0":"") + n; };
+  var s = d.toLocaleString("ja-JP",{timeZone:"Asia/Tokyo",year:"numeric",month:"2-digit",
+          day:"2-digit",hour:"2-digit",minute:"2-digit"});
+  return s.replace(/\//g,"/");
+}
+
+function stamp(ms){
+  if(!ms) return "";
+  return jst(new Date(Number(ms)).toISOString());
+}
+
+function bar(msg, bad){
+  var b = document.getElementById("bar");
+  if(!msg){ b.className = "bar"; b.textContent = ""; return; }
+  b.className = "bar on" + (bad ? " bad" : "");
+  b.textContent = msg;
+}
+
+var BADGE = {
+  "new":       ["未入力", "new"],
+  "submitted": ["登録済・コード待ち", "submitted"],
+  "qr":        ["二次元コードあり", "qr"],
+  "shipped":   ["発送済み", "shipped"]
+};
+
+function render(){
+  var el = document.getElementById("list");
+  if(!orders.length){
+    el.innerHTML = '<div class="empty">発送待ちの注文はありません。<br>' +
+      '出てこないときは設定で eBay と連携してから「更新」を押してください。</div>';
+    return;
+  }
+  var html = "";
+  for(var i=0;i<orders.length;i++){
+    var o = orders[i];
+    var st = o.state || "new";
+    var b = BADGE[st] || BADGE["new"];
+    var a = o.address || {};
+    html += '<div class="card">';
+    html +=   '<div class="head" onclick="openDetail(\'' + esc(o.orderId) + '\')">';
+    html +=     '<div>';
+    html +=       '<div class="date">' + esc(jst(o.creationDate)) + '</div>';
+    html +=       '<div class="title">' + esc(o.title) + '</div>';
+    html +=       '<div class="meta">' + esc(a.name || "") + ' / ' + esc(a.country || "") +
+                  (o.buyer ? ' / ' + esc(o.buyer) : '') + '</div>';
+    html +=     '</div>';
+    html +=     '<span class="badge ' + b[1] + '">' + b[0] + '</span>';
+    html +=   '</div>';
+
+    if(st === "submitted"){
+      html += '<div class="row">';
+      html +=   '<button onclick="App.checkMail(\'' + esc(o.orderId) + '\')">メールを確認</button>';
+      html +=   '<button class="ghost" onclick="App.setState(\'' + esc(o.orderId) + '\',\'new\')">やり直す</button>';
+      html += '</div>';
+    }
+
+    if(st === "qr" || st === "shipped"){
+      html += '<div class="row">';
+      if(o.qrUrl){
+        html += '<button class="primary" onclick="App.openUrl(\'' + esc(o.qrUrl) + '\')">二次元コードを表示</button>';
+      }
+      html += '</div>';
+    }
+
+    if(st === "qr"){
+      html += '<div class="row">';
+      html +=   '<input class="track" id="tr_' + esc(o.orderId) + '" placeholder="お問い合わせ番号" ' +
+                'value="' + esc(o.trackingNo || "") + '" autocapitalize="characters">';
+      html +=   '<button class="primary" onclick="ship(\'' + esc(o.orderId) + '\')">発送済み</button>';
+      html += '</div>';
+    }
+
+    if(st === "shipped"){
+      html += '<div class="meta">' + esc(o.trackingNo || "") + ' / ' + esc(stamp(o.shippedAt)) + '</div>';
+    }
+    html += '</div>';
+  }
+  var anyShipped = orders.some(function(o){ return o.state === "shipped"; });
+  if(anyShipped){
+    html += '<div class="row"><button onclick="App.clearShipped()">発送済みを一覧から消す</button></div>';
+  }
+  el.innerHTML = html;
+}
+
+function find(id){
+  for(var i=0;i<orders.length;i++){ if(orders[i].orderId === id) return orders[i]; }
+  return null;
+}
+
+function openDetail(id){
+  var o = find(id);
+  if(!o) return;
+  current = o;
+  var a = o.address || {};
+  var f = o.form || {};
+
+  document.getElementById("dTitle").textContent = o.title || "";
+  var lines = [];
+  if(a.name) lines.push(a.name);
+  if(a.line1) lines.push(a.line1);
+  if(a.line2) lines.push(a.line2);
+  var city = [a.city, a.state, a.postal].filter(Boolean).join(" ");
+  if(city) lines.push(city);
+  if(a.country) lines.push(a.country);
+  if(a.phone) lines.push("TEL " + a.phone);
+  if(a.email) lines.push(a.email);
+  document.getElementById("dAddr").textContent = lines.join("\n");
+
+  document.getElementById("fContent").value = f.content || o.title || "";
+  document.getElementById("fWeight").value  = f.weight  || settings.defWeight || "";
+  document.getElementById("fQty").value     = f.quantity || o.quantity || 1;
+  document.getElementById("fHs").value      = f.hsCode  || settings.defHsCode || "";
+  document.getElementById("fOrigin").value  = f.origin  || settings.defOrigin || "JP";
+  document.getElementById("fValue").value   = f.value   || "";
+  document.getElementById("dPriceHint").textContent =
+    o.totalValue ? ("eBay の受注額 " + o.totalValue + " " + (o.totalCurrency || "")) : "";
+
+  document.getElementById("detail").classList.add("on");
+  window.scrollTo(0,0);
+}
+
+function closeDetail(){
+  if(current) App.saveForm(current.orderId, JSON.stringify(formValues()));
+  document.getElementById("detail").classList.remove("on");
+  current = null;
+}
+
+function formValues(){
+  return {
+    content:  document.getElementById("fContent").value.trim(),
+    weight:   document.getElementById("fWeight").value.trim(),
+    quantity: document.getElementById("fQty").value.trim(),
+    hsCode:   document.getElementById("fHs").value.trim(),
+    origin:   document.getElementById("fOrigin").value.trim(),
+    value:    document.getElementById("fValue").value.trim()
+  };
+}
+
+function submitDetail(){
+  if(!current) return;
+  var f = formValues();
+  if(!f.content){ bar("商品内容を入れてください", true); return; }
+  var id = current.orderId;
+  document.getElementById("detail").classList.remove("on");
+  current = null;
+  App.submit(id, JSON.stringify(f));
+}
+
+function ship(id){
+  var el = document.getElementById("tr_" + id);
+  App.markShipped(id, el ? el.value.trim() : "");
+}
+
+// ------------------------------------------------------------------ 設定
+
+var S = [
+  ["sEnv","ebayEnv"], ["sClientId","ebayClientId"], ["sClientSecret","ebayClientSecret"],
+  ["sRuName","ebayRuName"], ["sCarrier","carrierCode"],
+  ["sJpId","jpLoginId"], ["sJpPw","jpPassword"], ["sJpUrl","jpStartUrl"],
+  ["sMailHost","mailHost"], ["sMailPort","mailPort"], ["sMailUser","mailUser"],
+  ["sMailPw","mailPassword"], ["sMailFolder","mailFolder"], ["sMailSubject","mailSubject"],
+  ["sFromName","fromName"], ["sFromPostal","fromPostal"], ["sFromAddress","fromAddress"],
+  ["sFromPhone","fromPhone"],
+  ["sDefHs","defHsCode"], ["sDefOrigin","defOrigin"], ["sDefWeight","defWeight"]
+];
+
+function fillSettings(s){
+  settings = s || {};
+  for(var i=0;i<S.length;i++){
+    var el = document.getElementById(S[i][0]);
+    if(el) el.value = settings[S[i][1]] == null ? "" : settings[S[i][1]];
+  }
+  document.getElementById("sLinked").textContent =
+    settings.ebayLinked ? "連携済みです" : "まだ連携していません";
+}
+
+function openSettings(){
+  fillSettings(JSON.parse(App.getSettings()));
+  document.getElementById("settings").classList.add("on");
+  window.scrollTo(0,0);
+}
+
+function closeSettings(){
+  document.getElementById("settings").classList.remove("on");
+}
+
+function saveSettings(){
+  var out = {};
+  for(var i=0;i<S.length;i++){
+    var el = document.getElementById(S[i][0]);
+    if(el) out[S[i][1]] = el.value.trim();
+  }
+  App.saveSettings(JSON.stringify(out));
+  settings = out;
+  bar("設定を保存しました");
+  closeSettings();
+}
+
+// ------------------------------------------------------- Kotlin からの知らせ
+
+window.__native = function(kind, data){
+  if(kind === "orders"){
+    orders = data.orders || [];
+    render();
+    if(data.msg) bar(data.msg);
+  } else if(kind === "busy"){
+    if(data.on) bar(data.msg || "処理中…"); else bar("");
+  } else if(kind === "toast"){
+    bar(data.msg, data.bad);
+  } else if(kind === "settings"){
+    fillSettings(data);
+  }
+};
+
+// 起動したらまず手元の一覧を出し、そのまま eBay に取りに行く
+try {
+  orders = JSON.parse(App.getOrders());
+  settings = JSON.parse(App.getSettings());
+} catch(e){ orders = []; }
+render();
+App.refresh();
+</script>
+</body>
+</html>
