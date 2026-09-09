@@ -42,6 +42,8 @@ class JpPostActivity : AppCompatActivity() {
     private var autoFill = true
     private var picking = false
     private var lastPageKey = ""
+    /** 同じ画面で何度も「次へ」を押さないための目印。 */
+    private var advancedUrl = ""
 
     companion object {
         fun intent(ctx: Context, orderId: String): Intent =
@@ -116,8 +118,10 @@ class JpPostActivity : AppCompatActivity() {
             setBackgroundColor(Color.parseColor("#221b14"))
             setPadding(12, 10, 12, 10)
         }
-        bar.addView(btn("自動入力") { fillNow(true) })
-        bar.addView(btn("ログイン") { autoLogin(true) })
+        // 画面が差し替わっても効くよう、押すたびに JS を入れ直してから動かす
+        bar.addView(btn("自動入力") { inject { fillNow(true) } })
+        bar.addView(btn("ログイン") { inject { autoLogin(true) } })
+        bar.addView(btn("次へ") { inject { pressNext(true) } })
         bar.addView(btn("欄を記録") { togglePick() })
         bar.addView(btn("項目一覧") { describe() })
         bar.addView(btn("登録できた") { confirmDone() })
@@ -198,11 +202,42 @@ class JpPostActivity : AppCompatActivity() {
                 if (names.isEmpty()) "$head。内容を確かめて次へ進んでください"
                 else "$head / 入らなかった欄: ${names.joinToString("、")}"
             )
+            // 全部入ったときだけ、設定で許してあれば自分で次へ進む
+            if (names.isEmpty() && filled.length() > 0 &&
+                Db.get(this, "jpAutoAdvance").isNotEmpty()
+            ) {
+                val here = web.url ?: ""
+                if (here != advancedUrl) {
+                    advancedUrl = here
+                    // 画面側の入力チェックが走り終わるのを少し待つ
+                    web.postDelayed({ pressNext(false) }, 1500L)
+                }
+            }
+        }
+    }
+
+    /**
+     * 「次へ」にあたるボタンを文言で探して押す。
+     * 押すと取り消せない「登録」「送信」は、自動のときは触らない。
+     */
+    private fun pressNext(manual: Boolean) {
+        val words = if (manual) {
+            listOf("次へ", "確認", "内容確認", "進む", "登録", "送信", "この内容で")
+        } else {
+            listOf("次へ", "内容確認", "確認", "進む")
+        }
+        val js = "window.__jp && window.__jp.press(" + JSONArray(words) + ")"
+        web.evaluateJavascript(js) { raw ->
+            val hit = raw != null && raw.length > 2 && raw != "\"\""
+            if (manual && !hit) say("押せるボタンが見つかりませんでした")
+            else if (hit) say("次の画面へ進みます")
         }
     }
 
     /** 入れた結果を受け取りつつ、当たった欄はそのまま覚えておく。 */
     private fun runFill(data: JSONObject, then: (JSONObject) -> Unit) {
+        // ページ内で画面が切り替わることがあるので、覚え書きは今の URL で引く
+        lastPageKey = pageKey(web.url)
         val profile = Db.jpProfile(this).optJSONObject(lastPageKey) ?: JSONObject()
         val js = "window.__jp && window.__jp.fill(" +
                 data.toString() + "," + profile.toString() + ")"

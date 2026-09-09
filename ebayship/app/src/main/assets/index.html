@@ -151,6 +151,13 @@
     <label>ログイン ID</label><input id="sJpId" autocapitalize="off">
     <label>パスワード</label><input id="sJpPw" type="password">
     <label>開始 URL</label><input id="sJpUrl" autocapitalize="off">
+    <label>入力のあと自動で「次へ」を押す</label>
+    <select id="sJpAuto">
+      <option value="">押さない（自分で確認する）</option>
+      <option value="1">押す</option>
+    </select>
+    <div class="hint">全部の欄が埋まった画面だけ自動で進みます。
+      取り消せない「登録」「送信」は自動では押しません。</div>
     <div class="row"><button onclick="App.resetJpProfile()">覚えた入力欄を消す</button></div>
 
     <div class="sect">二次元コードのメール（IMAP）</div>
@@ -352,6 +359,7 @@ var S = [
   ["sEnv","ebayEnv"], ["sClientId","ebayClientId"], ["sClientSecret","ebayClientSecret"],
   ["sRuName","ebayRuName"], ["sCarrier","carrierCode"],
   ["sJpId","jpLoginId"], ["sJpPw","jpPassword"], ["sJpUrl","jpStartUrl"],
+  ["sJpAuto","jpAutoAdvance"],
   ["sMailHost","mailHost"], ["sMailPort","mailPort"], ["sMailUser","mailUser"],
   ["sMailPw","mailPassword"], ["sMailFolder","mailFolder"], ["sMailSubject","mailSubject"],
   ["sFromName","fromName"], ["sFromPostal","fromPostal"], ["sFromAddress","fromAddress"],

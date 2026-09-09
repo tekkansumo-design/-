@@ -73,6 +73,8 @@ object Db {
         put("jpLoginId", "")
         put("jpPassword", "")
         put("jpStartUrl", "https://www.int-mypage.post.japanpost.jp/smart/MSC1000")
+        // 入力のあと「次へ」まで自動で押すか。既定は押さない
+        put("jpAutoAdvance", "")
 
         put("mailHost", "imap.gmail.com")
         put("mailPort", 993)
