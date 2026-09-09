@@ -1338,7 +1338,14 @@ RuName = ..."></textarea>
   </div>
   <div class="hint" id="sLinked"></div>
   <div id="linkBox" style="display:none">
-    <label>飛ばされた先の URL をまるごと貼ってください</label>
+    <div class="hint">下のリンクが開かなかったときは、これを押してください。</div>
+    <div class="row">
+      <a id="consentLink" href="#" target="_blank" rel="noopener">
+        <button class="primary">eBay の許可画面を開く</button></a>
+    </div>
+    <label>許可したあと、飛ばされた先の URL をまるごと貼ってください</label>
+    <div class="hint">表示できないページでも構いません。
+      アドレス欄の文字をそのままコピーしてください。</div>
     <textarea id="sCode" rows="3"
       placeholder="https://.../?code=v%5E1.1%23i%5E1%23..."></textarea>
     <div class="row"><button class="primary" onclick="finishLink()">連携を完了する</button></div>
@@ -1638,13 +1645,16 @@ function fillSettings(){
 }
 function afterConf(r){ if(r && r.conf){ conf = r.conf; fillSettings(); } return r; }
 function openSettings(){ fillSettings(); openModal("settings"); }
-function saveSettings(){
+function collectSettings(){
   var out = {};
   for(var i=0;i<S.length;i++){
     var el = document.getElementById(S[i][0]);
     if(el) out[S[i][1]] = el.value.trim();
   }
-  post("/api/conf", out).then(afterConf);
+  return out;
+}
+function saveSettings(){
+  return post("/api/conf", collectSettings()).then(afterConf);
 }
 function importBulk(){
   var el = document.getElementById("sBulk");
@@ -1657,12 +1667,21 @@ function importBulk(){
 }
 
 function startLink(){
-  saveSettings();
-  fetch("/api/consent").then(function(r){ return r.json(); }).then(function(r){
+  // 先に保存を終わらせる。待たずに進むと、いま打った値が反映されないまま
+  // 認可 URL を組んでしまう
+  post("/api/conf", collectSettings()).then(function(r){
+    afterConf(r);
+    return fetch("/api/consent").then(function(x){ return x.json(); });
+  }).then(function(r){
     if(!r.ok){ bar(r.error, true); return; }
-    window.open(r.url, "_blank");
+    // ポップアップは塞がれることがあるので、押せるリンクとしても出しておく
     document.getElementById("linkBox").style.display = "";
-    bar(r.env + "の eBay にログインして許可し、飛ばされた先の URL を貼ってください");
+    document.getElementById("consentLink").href = r.url;
+    var w = null;
+    try { w = window.open(r.url, "_blank"); } catch(e){ w = null; }
+    bar(r.env + "の eBay にログインして許可してください。" +
+        (w ? "" : "別のタブが開かなかったので、下のボタンを押してください。") +
+        "\n許可したあと、飛ばされた先の URL をまるごと下に貼ります。");
   });
 }
 function finishLink(){
