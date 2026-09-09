@@ -143,7 +143,12 @@
 App ID = tetsuhir-py-SBX-...
 Cert ID = SBX-...
 RuName = ..."></textarea>
-    <div class="row"><button onclick="importBulk()">取り込む</button></div>
+    <div class="row">
+      <button onclick="importBulk()">取り込む</button>
+      <button id="sSeedBtn" onclick="App.applySeeds()" style="display:none">
+        埋め込み値を読み込む</button>
+    </div>
+    <div class="hint" id="sSeedHint"></div>
 
     <div class="sect">eBay</div>
     <label>環境</label>
@@ -388,6 +393,18 @@ function fillSettings(s){
   }
   document.getElementById("sLinked").textContent =
     settings.ebayLinked ? "連携済みです" : "まだ連携していません";
+
+  // 非公開リポジトリでビルドすると認証情報が APK に焼き込まれる
+  var seedBtn = document.getElementById("sSeedBtn");
+  var seedHint = document.getElementById("sSeedHint");
+  if(settings.hasSeeds){
+    seedBtn.style.display = "";
+    seedHint.textContent = "この APK には認証情報が焼き込まれています。" +
+      "初回起動時に入っているので、普段は押す必要はありません。";
+  } else {
+    seedBtn.style.display = "none";
+    seedHint.textContent = "";
+  }
 
   // App ID 自体が SBX / PRD を持っているので、環境はそちらを正とする
   var id = String(settings.ebayClientId || "").toUpperCase();

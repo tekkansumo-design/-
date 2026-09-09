@@ -36,8 +36,38 @@ jobs:
           key: ebayship-gradle-${{ hashFiles('ebayship/**/*.gradle.kts', 'ebayship/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: ebayship-gradle-
 
+      # 認証情報を APK に焼き込むのは、リポジトリが非公開のときだけ。
+      # 公開リリースの APK は誰でも落とせて中身も取り出せるので、
+      # 公開に戻したら次のビルドから自動で焼き込みが止まる。
+      - name: Check embedding
+        id: embed
+        run: |
+          if [ "${{ github.event.repository.private }}" = "true" ]; then
+            echo "on=true" >> "$GITHUB_OUTPUT"
+            echo "非公開リポジトリなので、設定した Secrets を APK に焼き込みます"
+          else
+            echo "on=false" >> "$GITHUB_OUTPUT"
+            echo "公開リポジトリなので焼き込みません（アプリの設定画面から入力してください）"
+          fi
+
       - name: Build debug APK
         working-directory: ebayship
+        env:
+          EBAYSHIP_EMBED: ${{ steps.embed.outputs.on }}
+          EBAY_APP_ID: ${{ secrets.EBAY_APP_ID }}
+          EBAY_CERT_ID: ${{ secrets.EBAY_CERT_ID }}
+          EBAY_RUNAME: ${{ secrets.EBAY_RUNAME }}
+          JP_LOGIN_ID: ${{ secrets.JP_LOGIN_ID }}
+          JP_PASSWORD: ${{ secrets.JP_PASSWORD }}
+          MAIL_USER: ${{ secrets.MAIL_USER }}
+          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+          FROM_NAME: ${{ secrets.FROM_NAME }}
+          FROM_POSTAL: ${{ secrets.FROM_POSTAL }}
+          FROM_ADDRESS: ${{ secrets.FROM_ADDRESS }}
+          FROM_PHONE: ${{ secrets.FROM_PHONE }}
+          DEF_HS_CODE: ${{ secrets.DEF_HS_CODE }}
+          DEF_ORIGIN: ${{ secrets.DEF_ORIGIN }}
+          DEF_WEIGHT: ${{ secrets.DEF_WEIGHT }}
         run: ./gradlew --no-daemon assembleDebug
 
       - name: Rename APK
@@ -62,7 +92,7 @@ jobs:
             スマホのブラウザでこのページを開き、下の .apk をタップするとインストールできます。
             「提供元不明のアプリ」の許可を求められたら許可してください。
 
-            初回は アプリの「設定」から eBay の App ID / Cert ID / RuName、
-            国際郵便マイページの ID / パスワード、二次元コード通知メールの IMAP を入れてください。
+            認証情報の焼き込み: ${{ steps.embed.outputs.on }}
+            （true なら設定済みの状態で起動します。false ならアプリの「設定」から入力してください）
           files: out/*.apk
           generate_release_notes: false

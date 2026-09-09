@@ -226,6 +226,20 @@ class MainActivity : AppCompatActivity() {
             Db.save(this@MainActivity, JSONObject(json))
         }
 
+        /** ビルド時に焼き込んだ初期値を、いまの設定に上書きで入れ直す。 */
+        @JavascriptInterface
+        fun applySeeds() {
+            val n = Db.applySeeds(this@MainActivity, true)
+            emit("settings", Db.settingsForUi(this@MainActivity))
+            emit(
+                "toast",
+                JSONObject().put(
+                    "msg",
+                    if (n > 0) "${n}項目を読み込みました" else "焼き込まれた値はありません"
+                )
+            )
+        }
+
         /** まとめて貼り付けた設定を取り込む。 */
         @JavascriptInterface
         fun importSettings(text: String) {

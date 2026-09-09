@@ -21,6 +21,35 @@ Releases に `ebayship-<番号>` が出るので、スマホのブラウザか�
 6. 発送したら追跡番号（お問い合わせ番号）を入れて **発送済み** を押すと、
    eBay に追跡番号が登録され、Awaiting shipment から外れる。
 
+## 認証情報を APK に焼き込む
+
+端末で長い文字列を打たずに済ませたいとき、GitHub Secrets に入れておくと
+ビルド時に APK へ焼き込まれ、入れた直後から設定済みで起動する。
+
+**リポジトリが非公開のときしか焼き込まれない。** 公開リリースの APK は
+誰でも落とせて中身も取り出せるので、公開に戻すと次のビルドから自動的に止まる。
+値そのものはリポジトリには入らない。Secrets から環境変数で渡して BuildConfig に焼くだけ。
+
+Settings → Secrets and variables → Actions → New repository secret で入れる。
+
+| Secret 名 | 中身 |
+| --- | --- |
+| `EBAY_APP_ID` | App ID (Client ID) |
+| `EBAY_CERT_ID` | Cert ID (Client Secret) |
+| `EBAY_RUNAME` | RuName |
+| `JP_LOGIN_ID` | 国際郵便マイページのログイン ID |
+| `JP_PASSWORD` | 同パスワード |
+| `MAIL_USER` | 通知メールを受け取るアドレス |
+| `MAIL_PASSWORD` | Gmail のアプリパスワード |
+| `FROM_NAME` `FROM_POSTAL` `FROM_ADDRESS` `FROM_PHONE` | ご依頼主 |
+| `DEF_HS_CODE` `DEF_ORIGIN` `DEF_WEIGHT` | 内容品の初期値 |
+
+入れなかったものは空のまま。焼き込みが効いたかどうかはリリースの本文に出る。
+
+流し込まれるのはアプリを入れて最初に開いたときだけ。端末で直した値を
+ビルドのたびに巻き戻さないため。あとから入れ直したいときは設定画面の
+「埋め込み値を読み込む」を押す。
+
 ## 最初の設定
 
 アプリ右上の「設定」から。

@@ -23,6 +23,7 @@ object Db {
     private const val K_SETTINGS = "settings"
     private const val K_ORDERS = "orders"
     private const val K_PROFILE = "jppost_profile"
+    private const val K_SEEDED = "seeded"
 
     /** 画面に返すときパスワード類はこの文字列に置き換える。保存時これなら据え置き。 */
     const val MASK = "****"
@@ -95,7 +96,62 @@ object Db {
         put("defWeight", "")
     }
 
+    /**
+     * ビルド時に焼き込んだ初期値。設定の項目名 -> 値。
+     * 非公開リポジトリでのビルドでしか中身は入らない。空なら何もしない。
+     */
+    private fun seeds(): List<Pair<String, String>> = listOf(
+        "ebayClientId" to BuildConfig.SEED_EBAY_CLIENT_ID,
+        "ebayClientSecret" to BuildConfig.SEED_EBAY_CLIENT_SECRET,
+        "ebayRuName" to BuildConfig.SEED_EBAY_RUNAME,
+        "jpLoginId" to BuildConfig.SEED_JP_LOGIN_ID,
+        "jpPassword" to BuildConfig.SEED_JP_PASSWORD,
+        "mailUser" to BuildConfig.SEED_MAIL_USER,
+        "mailPassword" to BuildConfig.SEED_MAIL_PASSWORD,
+        "fromName" to BuildConfig.SEED_FROM_NAME,
+        "fromPostal" to BuildConfig.SEED_FROM_POSTAL,
+        "fromAddress" to BuildConfig.SEED_FROM_ADDRESS,
+        "fromPhone" to BuildConfig.SEED_FROM_PHONE,
+        "defHsCode" to BuildConfig.SEED_DEF_HS_CODE,
+        "defOrigin" to BuildConfig.SEED_DEF_ORIGIN,
+        "defWeight" to BuildConfig.SEED_DEF_WEIGHT
+    ).filter { it.second.isNotEmpty() }
+
+    /** 焼き込んだ値があるか。設定画面の案内に使う。 */
+    fun hasSeeds(): Boolean = seeds().isNotEmpty()
+
+    /**
+     * 焼き込んだ初期値を設定に入れる。
+     *
+     * overwrite が false なら、まだ何も入っていない項目だけ埋める。
+     * 端末で直した値をビルドのたびに巻き戻すのは筋が悪いので、
+     * 自動で走るのは初回だけにして、あとは設定画面から明示的に呼ぶ。
+     */
+    fun applySeeds(ctx: Context, overwrite: Boolean): Int {
+        val cur = settings(ctx)
+        val patch = JSONObject()
+        for ((k, v) in seeds()) {
+            if (overwrite || cur.optString(k).isEmpty()) patch.put(k, v)
+        }
+        if (patch.length() == 0) return 0
+        save(ctx, patch)
+        return patch.length()
+    }
+
+    /** アプリを入れて最初に開いたときだけ、焼き込んだ値を流し込む。 */
+    private fun seedOnce(ctx: Context) {
+        val p = plain(ctx)
+        if (p.getBoolean(K_SEEDED, false)) return
+        p.edit().putBoolean(K_SEEDED, true).apply()
+        applySeeds(ctx, false)
+    }
+
     fun settings(ctx: Context): JSONObject {
+        seedOnce(ctx)
+        return settingsRaw(ctx)
+    }
+
+    private fun settingsRaw(ctx: Context): JSONObject {
         val base = defaults()
         val raw = plain(ctx).getString(K_SETTINGS, null)
         if (raw != null) {
@@ -216,6 +272,7 @@ object Db {
         }
         // トークンそのものは画面に出さない。有無だけ伝える
         o.put("ebayLinked", o.optString("ebayRefreshToken").isNotEmpty())
+        o.put("hasSeeds", hasSeeds())
         o.remove("ebayRefreshToken")
         o.remove("ebayAccessToken")
         o.remove("ebayAccessExpiresAt")
