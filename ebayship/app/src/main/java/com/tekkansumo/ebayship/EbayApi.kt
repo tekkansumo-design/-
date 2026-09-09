@@ -28,7 +28,58 @@ object EbayApi {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    private fun sandbox(ctx: Context) = Db.get(ctx, "ebayEnv") == "sandbox"
+    /**
+     * サンドボックスか本番か。
+     *
+     * App ID は "-SBX-" か "-PRD-" を含んでいて、それ自体がどちらの鍵かを表している。
+     * 設定の環境と食い違っていると認可画面が "OAuth client was not found" を返すだけで、
+     * 食い違いに意味がある場面は無いので、鍵の側を正として扱い、
+     * 設定の環境は App ID から読み取れないときだけ見る。
+     */
+    private fun sandbox(ctx: Context): Boolean {
+        val id = Db.get(ctx, "ebayClientId").uppercase()
+        if (id.contains("-SBX-")) return true
+        if (id.contains("-PRD-")) return false
+        return Db.get(ctx, "ebayEnv") == "sandbox"
+    }
+
+    /** 設定画面に出す用。App ID から読み取った環境の名前。 */
+    fun envName(ctx: Context): String = if (sandbox(ctx)) "サンドボックス" else "本番"
+
+    /**
+     * 連携を始める前に、明らかにおかしい設定を見つける。
+     * 見つからなければ null。
+     */
+    fun preflight(ctx: Context): String? {
+        val s = Db.settings(ctx)
+        val id = s.optString("ebayClientId")
+        val secret = s.optString("ebayClientSecret")
+        val ru = s.optString("ebayRuName")
+
+        if (id.isEmpty()) return "App ID (Client ID) が未入力です"
+        if (secret.isEmpty()) return "Cert ID (Client Secret) が未入力です"
+        if (ru.isEmpty()) return "RuName が未入力です"
+
+        // App ID と RuName は形が違う。取り違えるとこの先で必ず失敗する
+        if (ru.uppercase().contains("-SBX-") || ru.uppercase().contains("-PRD-")) {
+            return "RuName の欄に App ID が入っているようです。\n" +
+                    "RuName は SBX / PRD を含まない別の文字列です。\n" +
+                    "Application Keys の User Tokens から確認してください。"
+        }
+        // 鍵の環境が揃っていないと、どちらの認可サーバーでも弾かれる
+        val idSbx = id.uppercase().contains("-SBX-")
+        val secretSbx = secret.uppercase().startsWith("SBX-")
+        if (id.uppercase().let { it.contains("-SBX-") || it.contains("-PRD-") } &&
+            secret.uppercase().let { it.startsWith("SBX-") || it.startsWith("PRD-") } &&
+            idSbx != secretSbx
+        ) {
+            return "App ID と Cert ID の環境が揃っていません。\n" +
+                    "App ID は${if (idSbx) "サンドボックス" else "本番"}、" +
+                    "Cert ID は${if (secretSbx) "サンドボックス" else "本番"}のものです。\n" +
+                    "同じキーセットの組で入れ直してください。"
+        }
+        return null
+    }
 
     fun apiBase(ctx: Context) =
         if (sandbox(ctx)) "https://api.sandbox.ebay.com" else "https://api.ebay.com"

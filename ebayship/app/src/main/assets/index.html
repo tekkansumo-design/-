@@ -148,6 +148,7 @@ RuName = ..."></textarea>
     <div class="sect">eBay</div>
     <label>環境</label>
     <select id="sEnv"><option value="production">本番</option><option value="sandbox">サンドボックス</option></select>
+    <div class="hint" id="sEnvHint"></div>
     <label>App ID (Client ID)</label><input id="sClientId" autocapitalize="off">
     <label>Cert ID (Client Secret)</label><input id="sClientSecret" type="password" autocapitalize="off">
     <label>RuName (redirect_uri)</label><input id="sRuName" autocapitalize="off">
@@ -387,6 +388,17 @@ function fillSettings(s){
   }
   document.getElementById("sLinked").textContent =
     settings.ebayLinked ? "連携済みです" : "まだ連携していません";
+
+  // App ID 自体が SBX / PRD を持っているので、環境はそちらを正とする
+  var id = String(settings.ebayClientId || "").toUpperCase();
+  var hint = document.getElementById("sEnvHint");
+  if(id.indexOf("-SBX-") >= 0){
+    hint.textContent = "App ID がサンドボックスのものなので、サンドボックスとして扱います。";
+  } else if(id.indexOf("-PRD-") >= 0){
+    hint.textContent = "App ID が本番のものなので、本番として扱います。";
+  } else {
+    hint.textContent = "App ID から環境が読み取れないときだけ、ここの選択を使います。";
+  }
 }
 
 function importBulk(){
