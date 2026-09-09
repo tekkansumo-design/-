@@ -1675,8 +1675,11 @@ function startLink(){
   }).then(function(r){
     if(!r.ok){ bar(r.error, true); return; }
     // ポップアップは塞がれることがあるので、押せるリンクとしても出しておく
-    document.getElementById("linkBox").style.display = "";
+    var box = document.getElementById("linkBox");
+    box.style.display = "";
     document.getElementById("consentLink").href = r.url;
+    // 見落とされると「何も起きない」に見えるので、確実に目に入れる
+    try { box.scrollIntoView({behavior:"smooth", block:"center"}); } catch(e){}
     var w = null;
     try { w = window.open(r.url, "_blank"); } catch(e){ w = null; }
     bar(r.env + "の eBay にログインして許可してください。" +
