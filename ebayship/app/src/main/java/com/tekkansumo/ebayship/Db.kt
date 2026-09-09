@@ -153,14 +153,13 @@ object Db {
         }
 
         if (patch.length() == 0) {
-            for (raw in trimmed.split('
-')) {
+            for (raw in trimmed.split('\n')) {
                 val line = raw.trim()
                 if (line.isEmpty() || line.startsWith("#")) continue
-                val at = line.indexOfFirst { it == '=' || it == ':' || it == '	' }
+                val at = line.indexOfFirst { it == '=' || it == ':' || it == '\t' }
                 if (at <= 0) continue
                 val key = alias(line.substring(0, at)) ?: continue
-                val value = line.substring(at + 1).trim().trim('"', ''', ',')
+                val value = line.substring(at + 1).trim().trim('"', '\'', ',')
                 if (value.isNotEmpty()) patch.put(key, value)
             }
         }
@@ -169,10 +168,9 @@ object Db {
         // 環境は SBX / PRD どちらの書き方でも受ける
         val env = patch.optString("ebayEnv").lowercase()
         if (env.isNotEmpty()) {
-            patch.put(
-                "ebayEnv",
-                if (env.contains("sand") || env.contains("sbx")) "sandbox" else "production"
-            )
+            val sandbox = env.contains("sand") || env.contains("sbx") ||
+                    env.contains("サンド") || env.contains("テスト")
+            patch.put("ebayEnv", if (sandbox) "sandbox" else "production")
         }
         save(ctx, patch)
         return patch.keys().asSequence().toList()
@@ -180,7 +178,7 @@ object Db {
 
     /** 貼り付けた見出しを設定の項目名に読み替える。 */
     private fun alias(rawKey: String): String? {
-        val k = rawKey.trim().trim('"', ''').lowercase()
+        val k = rawKey.trim().trim('"', '\'').lowercase()
             .replace(" ", "").replace("_", "").replace("-", "")
         return when (k) {
             "ebayenv", "env", "environment", "環境" -> "ebayEnv"

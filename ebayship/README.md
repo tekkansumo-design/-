@@ -104,6 +104,16 @@ Gmail なら サーバ `imap.gmail.com` / ポート `993` / パスワードは
 | `MailFetcher.kt` | 通知メールを IMAP で読んでリンクと番号を取り出す |
 | `Db.kt` | 設定と注文の保存。秘密は EncryptedSharedPreferences |
 
+## 手元での確認
+
+Android SDK が無くても、構文だけなら kotlinc で見られる。
+
+```
+./tools/syntax-check.sh
+```
+
+型が合っているかは android.jar が要るので、そこは GitHub Actions のビルドに任せる。
+
 ## 気をつけること
 
 - eBay のトークンやパスワードは端末の中だけに置く。どこにも送らない。
