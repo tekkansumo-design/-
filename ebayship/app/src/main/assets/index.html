@@ -134,6 +134,17 @@
     <button class="primary" onclick="saveSettings()">保存</button>
   </header>
   <div class="body">
+    <div class="sect">まとめて貼り付け</div>
+    <div class="hint">スマホで長い文字列を打たずに済むように、
+      <code>App ID = xxxx</code> のような行を並べて貼り付けると一度に取り込めます。
+      JSON でも読みます。</div>
+    <label>貼り付け欄</label>
+    <textarea id="sBulk" rows="6" placeholder="環境 = サンドボックス
+App ID = tetsuhir-py-SBX-...
+Cert ID = SBX-...
+RuName = ..."></textarea>
+    <div class="row"><button onclick="importBulk()">取り込む</button></div>
+
     <div class="sect">eBay</div>
     <label>環境</label>
     <select id="sEnv"><option value="production">本番</option><option value="sandbox">サンドボックス</option></select>
@@ -369,12 +380,21 @@ var S = [
 
 function fillSettings(s){
   settings = s || {};
+  // sBulk は貼り付け専用なので S の表には入れない
   for(var i=0;i<S.length;i++){
     var el = document.getElementById(S[i][0]);
     if(el) el.value = settings[S[i][1]] == null ? "" : settings[S[i][1]];
   }
   document.getElementById("sLinked").textContent =
     settings.ebayLinked ? "連携済みです" : "まだ連携していません";
+}
+
+function importBulk(){
+  var el = document.getElementById("sBulk");
+  var t = el.value.trim();
+  if(!t){ bar("貼り付け欄が空です", true); return; }
+  App.importSettings(t);
+  el.value = "";
 }
 
 function openSettings(){

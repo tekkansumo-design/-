@@ -25,6 +25,20 @@ Releases に `ebayship-<番号>` が出るので、スマホのブラウザか�
 
 アプリ右上の「設定」から。
 
+スマホで App ID のような長い文字列を打つのは骨が折れるので、
+設定のいちばん上に **まとめて貼り付け** の欄がある。
+次のような行を並べて貼り、「取り込む」を押せば一度に入る（JSON でも読む）。
+
+```
+環境 = サンドボックス
+App ID = xxxxxxxx-xxxxxx-SBX-xxxxxxxxx-xxxxxxxx
+Cert ID = SBX-xxxxxxxxxxxx-xxxx-xxxx-xxxx-xxxx
+RuName = Xxxx_Yyyy-xxxxxxxx-xxxxxx-xxxxxxxx
+```
+
+`App ID` `Client ID` `certid` `RuName` `redirect_uri` などの書き方は読み替える。
+Dev ID はこのアプリでは使わないので、混ざっていても捨てる。
+
 ### eBay
 
 [developer.ebay.com](https://developer.ebay.com/) でアプリを1つ作り、次の3つを入れる。

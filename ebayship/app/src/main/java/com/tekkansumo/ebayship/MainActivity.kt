@@ -226,6 +226,18 @@ class MainActivity : AppCompatActivity() {
             Db.save(this@MainActivity, JSONObject(json))
         }
 
+        /** まとめて貼り付けた設定を取り込む。 */
+        @JavascriptInterface
+        fun importSettings(text: String) {
+            val got = Db.importText(this@MainActivity, text)
+            if (got.isEmpty()) {
+                fail("読み取れる設定がありませんでした")
+                return
+            }
+            emit("settings", Db.settingsForUi(this@MainActivity))
+            emit("toast", JSONObject().put("msg", "${got.size}項目を取り込みました"))
+        }
+
         @JavascriptInterface
         fun linkEbay() {
             runOnUiThread {

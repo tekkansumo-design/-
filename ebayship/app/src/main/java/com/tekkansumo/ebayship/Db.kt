@@ -131,6 +131,85 @@ object Db {
         plain(ctx).edit().putString(K_SETTINGS, open.toString()).apply()
     }
 
+    /**
+     * まとめて貼り付けた文字を設定として取り込む。
+     *
+     * スマホで App ID のような長い文字列を打つのは骨が折れるので、
+     * JSON でも「App ID = xxxx」のような行の並びでも受け取れるようにする。
+     * 戻り値は取り込んだ項目名。
+     */
+    fun importText(ctx: Context, text: String): List<String> {
+        val patch = JSONObject()
+        val trimmed = text.trim()
+
+        if (trimmed.startsWith("{")) {
+            try {
+                val o = JSONObject(trimmed)
+                for (k in o.keys()) {
+                    val key = alias(k) ?: continue
+                    patch.put(key, o.optString(k))
+                }
+            } catch (e: Exception) { /* JSON でなければ行として読む */ }
+        }
+
+        if (patch.length() == 0) {
+            for (raw in trimmed.split('
+')) {
+                val line = raw.trim()
+                if (line.isEmpty() || line.startsWith("#")) continue
+                val at = line.indexOfFirst { it == '=' || it == ':' || it == '	' }
+                if (at <= 0) continue
+                val key = alias(line.substring(0, at)) ?: continue
+                val value = line.substring(at + 1).trim().trim('"', ''', ',')
+                if (value.isNotEmpty()) patch.put(key, value)
+            }
+        }
+
+        if (patch.length() == 0) return emptyList()
+        // 環境は SBX / PRD どちらの書き方でも受ける
+        val env = patch.optString("ebayEnv").lowercase()
+        if (env.isNotEmpty()) {
+            patch.put(
+                "ebayEnv",
+                if (env.contains("sand") || env.contains("sbx")) "sandbox" else "production"
+            )
+        }
+        save(ctx, patch)
+        return patch.keys().asSequence().toList()
+    }
+
+    /** 貼り付けた見出しを設定の項目名に読み替える。 */
+    private fun alias(rawKey: String): String? {
+        val k = rawKey.trim().trim('"', ''').lowercase()
+            .replace(" ", "").replace("_", "").replace("-", "")
+        return when (k) {
+            "ebayenv", "env", "environment", "環境" -> "ebayEnv"
+            "ebayclientid", "appid", "clientid", "applicationid" -> "ebayClientId"
+            "ebayclientsecret", "certid", "clientsecret" -> "ebayClientSecret"
+            "ebayruname", "runame", "redirecturi", "redirecturl" -> "ebayRuName"
+            "carriercode", "carrier" -> "carrierCode"
+            "jploginid", "jpid", "jplogin" -> "jpLoginId"
+            "jppassword", "jppw" -> "jpPassword"
+            "jpstarturl", "jpurl" -> "jpStartUrl"
+            "jpautoadvance", "jpauto" -> "jpAutoAdvance"
+            "mailhost", "imaphost" -> "mailHost"
+            "mailport", "imapport" -> "mailPort"
+            "mailuser", "imapuser", "mailaddress" -> "mailUser"
+            "mailpassword", "imappassword", "apppassword" -> "mailPassword"
+            "mailfolder" -> "mailFolder"
+            "mailsubject" -> "mailSubject"
+            "fromname" -> "fromName"
+            "frompostal", "fromzip" -> "fromPostal"
+            "fromaddress" -> "fromAddress"
+            "fromphone", "fromtel" -> "fromPhone"
+            "defhscode", "hscode" -> "defHsCode"
+            "deforigin", "origin" -> "defOrigin"
+            "defweight", "weight" -> "defWeight"
+            // Dev ID はこのアプリでは使わないので黙って捨てる
+            else -> null
+        }
+    }
+
     /** 画面に渡す用。パスワード類は入っていれば MASK にする。 */
     fun settingsForUi(ctx: Context): JSONObject {
         val o = settings(ctx)
