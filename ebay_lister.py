@@ -1157,8 +1157,12 @@ def api_ebay_test():
         try:
             out.append({"ok": True, "label": label, "detail": fn() or ""})
             return True
-        except (AppError, requests.RequestException) as e:
+        except AppError as e:
             out.append({"ok": False, "label": label, "detail": explain_ebay_error(str(e))})
+            return False
+        except requests.RequestException:
+            out.append({"ok": False, "label": label,
+                        "detail": "eBay に接続できません。インターネット接続を確認してください"})
             return False
 
     def anthropic_key():
@@ -1417,10 +1421,11 @@ section{display:none}section.on{display:block}
 label{display:block;font-size:13px;color:var(--sub);margin:10px 0 3px}
 input,select,textarea{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--fg);font:inherit}
 textarea{min-height:90px}
-button.b{border:0;border-radius:8px;padding:10px 14px;background:var(--acc);color:#fff;font:inherit;font-weight:600;cursor:pointer}
-button.b.sub{background:var(--line);color:var(--fg)}
-button.b.ok{background:var(--ok)}
-button.b:disabled{opacity:.5;cursor:default}
+a.b{text-decoration:none;display:inline-block}
+.b{border:0;border-radius:8px;padding:10px 14px;background:var(--acc);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+.b.sub{background:var(--line);color:var(--fg)}
+.b.ok{background:var(--ok)}
+.b:disabled{opacity:.5;cursor:default}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}.row>*{flex:1;min-width:120px}
 .row>.shrink{flex:0 0 auto}
 .muted{color:var(--sub);font-size:13px}

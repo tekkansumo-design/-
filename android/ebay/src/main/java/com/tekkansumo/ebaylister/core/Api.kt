@@ -127,7 +127,7 @@ class Api(private val store: ConfStore) {
             steps.put(JSONObject().put("ok", false).put("label", label).put("detail", explain(e.message.orEmpty())))
             false
         } catch (e: IOException) {
-            steps.put(JSONObject().put("ok", false).put("label", label).put("detail", "通信エラー: ${e.message}"))
+            steps.put(JSONObject().put("ok", false).put("label", label).put("detail", "eBay に接続できません。インターネット接続を確認してください"))
             false
         }
         step("Anthropic API キー") {
