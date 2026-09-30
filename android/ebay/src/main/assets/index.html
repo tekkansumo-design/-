@@ -204,7 +204,9 @@ a{color:var(--acc)}
         <div class="copyrow"><code>https://example.com/</code><button class="b sub cp" data-copy="https://example.com/">コピー</button></div>
         <div class="muted">（Your privacy policy URL / Your auth accepted URL / Your auth declined URL）<br>
           保存後に表示される <i>RuName (eBay Redirect URL name)</i> の値をコピーして貼ります。</div>
-        <a class="b sub lnk" href="https://developer.ebay.com/my/auth/?env=production&amp;index=0" target="_blank" rel="noopener">User Tokens ページを開く</a>
+        <div class="muted">いまの設定は <b id="ruEnv">本番</b> です。RuName は<b>キーと同じ環境</b>（本番 / Sandbox）のタブで作ってください。
+          違う環境の RuName だと、eBay の画面で <code>invalid_request</code> になります。</div>
+        <a class="b sub lnk" id="ruLink" href="https://developer.ebay.com/my/auth/?env=production&amp;index=0" target="_blank" rel="noopener">User Tokens ページを開く</a>
         <div class="row" style="margin-top:6px"><input id="ruPaste" placeholder="例: Tekkan_Sumo-TekkanSu-ebayli-abcde">
           <button class="b sub shrink" id="btnRuPaste">保存</button></div> <span id="ruStat" class="muted"></span></li>
       <li id="st5"><b>eBay アカウントと連携する</b>
@@ -588,6 +590,10 @@ function fillConf(c){
   $('#csState').textContent=c.has_client_secret?'（登録済み）':'（未登録）';
   $('#linkState').innerHTML=c.has_refresh_token?'<span class="okt">連携済み</span>'+(c.refresh_token_expires?'（'+esc(c.refresh_token_expires)+' まで有効）':'')
     :'未連携';
+  // RuName はキーと同じ環境のページで作る必要がある
+  const sbx=c.ebay_env==='sandbox';
+  $('#ruEnv').textContent=sbx?'Sandbox（テスト）':'本番';
+  $('#ruLink').href='https://developer.ebay.com/my/auth/?env='+(sbx?'sandbox':'production')+'&index=0';
   const done={st3:c.client_id&&c.has_client_secret,st4:!!c.ru_name,st5:c.has_refresh_token,
     st6:c.fulfillment_policy_id&&c.payment_policy_id&&c.return_policy_id&&c.merchant_location_key};
   if(done.st3){done.st1=done.st2=true;}
