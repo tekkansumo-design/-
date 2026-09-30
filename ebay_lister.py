@@ -21,20 +21,31 @@ eBay 出品アシスタント
     App ID (Client ID) / Cert ID (Client Secret) / RuName
   - eBay セラーアカウントでビジネスポリシー（送料・支払・返品）を有効化済みであること
 
+アイコンで起動する:
+  - スマホ: 画面を開いてブラウザのメニューから「ホーム画面に追加」（iPhone は共有 →
+    「ホーム画面に追加」）。以後はアイコンからアプリのように全画面で開く。
+    Termux でサーバーごと起動したい場合は ebay_lister_termux.sh を Termux:Widget に置く
+  - パソコン: Chrome / Edge のアドレスバー右の「インストール」ボタン
+  どちらもサーバー（このスクリプト）が動いている必要がある。
+
 設定ファイル ebay_lister_config.json には API キーとトークンが平文で入る。
 他人に渡さないこと（.gitignore 済み）。既定では 127.0.0.1 でだけ待ち受ける。
 スマホから LAN 越しに使う場合は EBAY_LISTER_HOST=0.0.0.0 を付けて起動する。
 """
 
 import base64
+import functools
 import json
+import math
 import os
 import re
 import secrets
 import statistics
+import struct
 import threading
 import time
 import traceback
+import zlib
 from datetime import datetime
 from html import unescape
 from pathlib import Path
@@ -884,6 +895,159 @@ def index():
     return Response(PAGE, mimetype="text/html")
 
 
+# ═══════════════════════════════════════════════
+#  アイコン（ホーム画面に追加できるように）
+#  Pillow なしで動かしたいので、値札の形を距離関数で直接 PNG に描く
+# ═══════════════════════════════════════════════
+ICON_BG = (11, 99, 206)
+APP_NAME = "eBay 出品アシスタント"
+APP_SHORT = "eBay出品"
+# 値札（左向き）。回転前の座標で、中心 (0,0)・アイコン全体を 1 とした大きさ
+TAG_POLY = [(-0.30, 0.0), (-0.13, -0.17), (0.27, -0.17), (0.27, 0.17), (-0.13, 0.17)]
+TAG_ROUND = 0.03
+TAG_HOLE = (-0.115, 0.0, 0.045)
+TAG_ANGLE = -45
+TAG_SHIFT = (-0.047, 0.047)             # 回転後の見た目の重心を中央に寄せる
+
+
+def _sd_poly(x, y, pts):
+    d = (x - pts[0][0]) ** 2 + (y - pts[0][1]) ** 2
+    inside = False
+    for i in range(len(pts)):
+        ax, ay = pts[i - 1]
+        bx, by = pts[i]
+        ex, ey, wx, wy = bx - ax, by - ay, x - ax, y - ay
+        t = max(0.0, min(1.0, (wx * ex + wy * ey) / (ex * ex + ey * ey)))
+        qx, qy = wx - ex * t, wy - ey * t
+        d = min(d, qx * qx + qy * qy)
+        if (ay > y) != (by > y) and x < ax + (y - ay) * ex / ey:
+            inside = not inside
+    return -math.sqrt(d) if inside else math.sqrt(d)
+
+
+def _png(w, h, rows):
+    def chunk(t, data):
+        return struct.pack(">I", len(data)) + t + data + struct.pack(">I", zlib.crc32(t + data))
+    raw = b"".join(b"\x00" + r for r in rows)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+
+
+@functools.lru_cache(maxsize=8)
+def icon_png(size, rounded=True):
+    """rounded=False は全面塗り（maskable / iOS 用。角丸は OS 側が付ける）。"""
+    a = math.radians(TAG_ANGLE)
+    ca, sa = math.cos(a), math.sin(a)
+    hx, hy, hr = TAG_HOLE
+    corner = 0.22
+    lim = 0.36                          # 値札が収まる範囲。外は距離計算を省く
+    rows = []
+    for py in range(size):
+        row = bytearray()
+        y = (py + 0.5) / size - 0.5
+        for px in range(size):
+            x = (px + 0.5) / size - 0.5
+            # 背景（角丸の四角）
+            if rounded:
+                qx, qy = abs(x) - (0.5 - corner), abs(y) - (0.5 - corner)
+                db = math.hypot(max(qx, 0), max(qy, 0)) + min(max(qx, qy), 0) - corner
+                alpha = max(0.0, min(1.0, 0.5 - db * size))
+            else:
+                alpha = 1.0
+            cov = 0.0
+            tx, ty = x - TAG_SHIFT[0], y - TAG_SHIFT[1]
+            if alpha > 0 and abs(tx) < lim and abs(ty) < lim:
+                # 値札の座標系へ戻す（回転の逆）
+                lx, ly = tx * ca + ty * sa, -tx * sa + ty * ca
+                dt = _sd_poly(lx, ly, TAG_POLY) - TAG_ROUND
+                dh = hr - math.hypot(lx - hx, ly - hy)      # 穴は差し引く
+                cov = max(0.0, min(1.0, 0.5 - max(dt, dh) * size))
+            r, g, b = (round(c + (255 - c) * cov) for c in ICON_BG)
+            row += bytes((r, g, b, round(alpha * 255)))
+        rows.append(bytes(row))
+    return _png(size, size, rows)
+
+
+def icon_svg():
+    pts = " ".join(f"{50 + x * 100:.1f},{50 + y * 100:.1f}" for x, y in TAG_POLY)
+    hx, hy, hr = TAG_HOLE
+    bg = "#%02x%02x%02x" % ICON_BG
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+            f'<rect width="100" height="100" rx="22" fill="{bg}"/>'
+            f'<g transform="translate({TAG_SHIFT[0] * 100:.1f} {TAG_SHIFT[1] * 100:.1f}) rotate({TAG_ANGLE} 50 50)">'
+            f'<polygon points="{pts}" fill="#fff" stroke="#fff" stroke-width="{TAG_ROUND * 200:.0f}" stroke-linejoin="round"/>'
+            f'<circle cx="{50 + hx * 100:.1f}" cy="{50 + hy * 100:.1f}" r="{hr * 100:.1f}" fill="{bg}"/>'
+            f'</g></svg>')
+
+
+MANIFEST = {
+    "name": APP_NAME,
+    "short_name": APP_SHORT,
+    "start_url": "/",
+    "scope": "/",
+    "display": "standalone",
+    "background_color": "#f5f6f8",
+    "theme_color": "#%02x%02x%02x" % ICON_BG,
+    "lang": "ja",
+    "icons": [
+        {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+        {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+        {"src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+        {"src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
+    ],
+}
+
+# 通信は素通しするだけ。古い Chrome が「インストール」を出す条件を満たすために置く
+SERVICE_WORKER = "self.addEventListener('install',()=>self.skipWaiting());\n" \
+                 "self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));\n" \
+                 "self.addEventListener('fetch',()=>{});\n"
+
+
+def _cached(body, mimetype):
+    r = Response(body, mimetype=mimetype)
+    r.headers["Cache-Control"] = "public, max-age=86400"
+    return r
+
+
+@app.get("/manifest.webmanifest")
+def manifest():
+    return _cached(json.dumps(MANIFEST, ensure_ascii=False), "application/manifest+json")
+
+
+@app.get("/favicon.svg")
+def favicon_svg():
+    return _cached(icon_svg(), "image/svg+xml")
+
+
+@app.get("/favicon.ico")
+def favicon_ico():
+    return _cached(icon_png(48), "image/png")
+
+
+@app.get("/icon-<int:size>.png")
+def icon(size):
+    if size not in (192, 512):
+        abort(404)
+    return _cached(icon_png(size), "image/png")
+
+
+@app.get("/icon-maskable-512.png")
+def icon_maskable():
+    return _cached(icon_png(512, rounded=False), "image/png")
+
+
+@app.get("/apple-touch-icon.png")
+def apple_touch_icon():
+    return _cached(icon_png(180, rounded=False), "image/png")
+
+
+@app.get("/sw.js")
+def service_worker():
+    r = Response(SERVICE_WORKER, mimetype="text/javascript")
+    r.headers["Cache-Control"] = "no-cache"
+    return r
+
+
 @app.get("/api/meta")
 def api_meta():
     return jsonify({"conditions": CONDITIONS, "marketplaces": list(MARKETPLACES)})
@@ -1159,6 +1323,13 @@ PAGE = r"""<!doctype html>
 <html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>eBay 出品アシスタント</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#0b63ce">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="eBay出品">
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--fg:#1d2330;--sub:#667085;--line:#e3e6eb;--acc:#0b63ce;--ok:#15803d;--ng:#c62828;--warn:#b45309}
 @media (prefers-color-scheme:dark){:root{--bg:#12151b;--card:#1b2029;--fg:#e6e9ef;--sub:#98a2b3;--line:#2c3340;--acc:#5aa2ff;--ok:#4ade80;--ng:#f87171;--warn:#fbbf24}}
@@ -1623,6 +1794,7 @@ $('#btnLoc').onclick=()=>run($('#btnLoc'),async()=>{
   $('#locStat').innerHTML='<span class="okt">作成しました</span>';
 },'作成中',$('#locStat'));
 
+if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
 (async()=>{
   META=await api('/api/meta');
   $('#condition').innerHTML=META.conditions.map(([k,l])=>`<option value="${k}">${esc(l)}（${k}）</option>`).join('');
