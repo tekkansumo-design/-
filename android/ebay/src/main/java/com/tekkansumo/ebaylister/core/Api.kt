@@ -65,6 +65,7 @@ class Api(private val store: ConfStore) {
         "POST /api/ebay/auth_code" -> authCode(b)
         "GET /api/ebay/policies" -> ebay.policies(conf())
         "POST /api/ebay/test" -> connectionTest()
+        "POST /api/anthropic/key" -> anthropicKey(b)
         "POST /api/ebay/location" -> location(b)
         "POST /api/identify" -> identify(b)
         "POST /api/categories" -> {
@@ -116,6 +117,16 @@ class Api(private val store: ConfStore) {
         return Conf.public(c)
     }
 
+    /** 貼り付けられた文字からキーを拾い、使えることを確かめてから保存する。 */
+    private fun anthropicKey(b: JSONObject): JSONObject {
+        val key = Regex("sk-ant-[A-Za-z0-9_\\-]{20,}").find(b.optString("key"))?.value
+            ?: throw AppError("キーが見つかりません。「sk-ant-」で始まる文字列をまるごと貼ってください")
+        claude.checkKey(key)
+        val c = conf().put("anthropic_api_key", key)
+        save(c)
+        return Conf.public(c)
+    }
+
     /** 設定を順に確かめ、どこで止まっているかを返す。ebay_lister.py の api_ebay_test と同じ。 */
     private fun connectionTest(): JSONObject {
         val c = conf()
@@ -131,8 +142,9 @@ class Api(private val store: ConfStore) {
             false
         }
         step("Anthropic API キー") {
-            if (c.optString("anthropic_api_key").isEmpty()) throw AppError("未設定です（下の「Anthropic」欄）")
-            "登録済み"
+            if (c.optString("anthropic_api_key").isEmpty()) throw AppError("未設定です（「Anthropic API かんたん登録」）")
+            claude.checkKey(c.optString("anthropic_api_key"))
+            "有効です"
         }
         if (step("eBay のキー（App ID / Cert ID）") {
                 ebay.token(c, "app")

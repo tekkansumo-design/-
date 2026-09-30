@@ -617,6 +617,29 @@ def claude_client(conf):
     return anthropic.Anthropic(api_key=key, max_retries=3)
 
 
+def check_anthropic_key(key=None):
+    """キーが使えるかを確かめる。models.retrieve はトークンを使わないので料金はかからない。"""
+    try:
+        import anthropic
+    except ImportError:
+        raise AppError("anthropic パッケージが必要です: pip install anthropic")
+    try:
+        anthropic.Anthropic(api_key=key or None, max_retries=1, timeout=20).models.retrieve(MODEL)
+    except anthropic.AuthenticationError:
+        raise AppError("キーが正しくありません（コピー漏れか、削除されたキーの可能性があります）")
+    except anthropic.PermissionDeniedError:
+        raise AppError("このキーには使う権限がありません（組織やワークスペースの設定を確認してください）")
+    except anthropic.NotFoundError:
+        raise AppError(f"このキーでは {MODEL} を使えません")
+    except anthropic.APIConnectionError:
+        raise AppError("Anthropic に接続できません。インターネット接続を確認してください")
+    except anthropic.APIStatusError as e:
+        if e.status_code != 429:            # 混雑しているだけならキー自体は有効
+            raise AppError(f"確認できませんでした ({e.status_code}): {e.message}")
+    except anthropic.AnthropicError as e:
+        raise AppError(f"確認できませんでした: {e}")
+
+
 def claude_create(client, **kw):
     import anthropic
     try:
@@ -626,6 +649,10 @@ def claude_create(client, **kw):
         raise AppError("Anthropic API キーが正しくありません")
     except anthropic.RateLimitError:
         raise AppError("Anthropic API の利用上限に達しました。しばらく待ってください")
+    except anthropic.BadRequestError as e:
+        if "credit balance" in str(e.message).lower():
+            raise AppError("Anthropic のクレジット残高が足りません。設定タブの「Anthropic API かんたん登録」②からクレジットを購入してください")
+        raise AppError(f"Anthropic API エラー ({e.status_code}): {e.message}")
     except anthropic.APIStatusError as e:
         raise AppError(f"Anthropic API エラー ({e.status_code}): {e.message}")
     except anthropic.APIConnectionError:
@@ -1147,6 +1174,22 @@ def explain_ebay_error(msg):
     return msg
 
 
+ANTHROPIC_KEY_RE = re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}")
+
+
+@app.post("/api/anthropic/key")
+def api_anthropic_key():
+    """貼り付けられた文字からキーを拾い、使えることを確かめてから保存する。"""
+    m = ANTHROPIC_KEY_RE.search(body_json().get("key") or "")
+    if not m:
+        raise AppError("キーが見つかりません。「sk-ant-」で始まる文字列をまるごと貼ってください")
+    check_anthropic_key(m.group(0))
+    conf = load_conf()
+    conf["anthropic_api_key"] = m.group(0)
+    save_conf(conf)
+    return jsonify(public_conf(conf))
+
+
 @app.post("/api/ebay/test")
 def api_ebay_test():
     """設定を順に確かめ、どこで止まっているかを返す。"""
@@ -1167,8 +1210,9 @@ def api_ebay_test():
 
     def anthropic_key():
         if not (conf.get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY")):
-            raise AppError("未設定です（下の「Anthropic」欄）")
-        return "登録済み"
+            raise AppError("未設定です（「Anthropic API かんたん登録」）")
+        check_anthropic_key(conf.get("anthropic_api_key"))
+        return "有効です"
 
     def app_keys():
         EBAY.token(conf, "app")
@@ -1545,9 +1589,26 @@ a{color:var(--acc)}
 
 <section id="tab-settings">
   <div class="card">
-    <h2>Anthropic（商品特定・調査・出品文）</h2>
-    <label>API キー <span id="akState" class="muted"></span></label>
-    <input id="anthropic_api_key" type="password" placeholder="sk-ant-...（空欄なら変更しない）" autocomplete="off">
+    <h2>Anthropic API かんたん登録 <span id="akState" class="muted"></span></h2>
+    <div class="muted">写真から商品を調べて出品文を作る AI（Claude）の鍵です。Claude.ai の有料プランとは別の契約で、使った分だけ料金がかかります。</div>
+    <ol class="steps">
+      <li id="as1"><b>Anthropic のアカウントを作る</b>
+        <div class="muted">メールアドレスか Google アカウントで登録します。</div>
+        <a class="b sub lnk" href="https://console.anthropic.com/" target="_blank" rel="noopener">登録ページを開く</a></li>
+      <li id="as2"><b>クレジットを買う</b>
+        <div class="muted">前払いです。まずは少額で十分です。自動チャージはオフのままにしておくと使いすぎを防げます。</div>
+        <a class="b sub lnk" href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener">支払いページを開く</a></li>
+      <li id="as3"><b>API キーを作る</b>
+        <div class="muted">「Create Key」を押し、名前（例: ebay）を付けて作ります。表示されたキーは<b>一度しか見られない</b>ので、すぐコピーしてください。</div>
+        <a class="b sub lnk" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">キーのページを開く</a></li>
+      <li id="as4"><b>キーを貼って確認する</b>
+        <div class="muted">貼ったキーが使えるかを Anthropic に問い合わせてから保存します（確認に料金はかかりません）。</div>
+        <div class="row" style="margin-top:6px"><input id="anthropic_api_key" type="password" placeholder="sk-ant-api03-..." autocomplete="off">
+          <button class="b sub shrink" id="btnAkSave">確認して保存</button></div>
+        <span id="akStat" class="muted"></span></li>
+    </ol>
+    <div class="muted">料金の目安: 1 商品の調査で数十円程度（写真の枚数と Web 検索の回数で変わります）。使った額は
+      <a href="https://console.anthropic.com/usage" target="_blank" rel="noopener">利用状況のページ</a>で確認できます。</div>
   </div>
   <div class="card" id="wizard">
     <h2>eBay API かんたん登録</h2>
@@ -1864,6 +1925,7 @@ function fillConf(c){
   FIELDS.forEach(k=>{$('#'+k).value=c[k]??'';});
   $('#scrape_sold').checked=!!c.scrape_sold;
   $('#akState').textContent=c.has_anthropic_api_key?'（登録済み）':c.has_anthropic_env?'（環境変数を使用中）':'（未登録）';
+  ['as1','as2','as3','as4'].forEach(k=>$('#'+k).classList.toggle('done',!!(c.has_anthropic_api_key||c.has_anthropic_env)));
   $('#csState').textContent=c.has_client_secret?'（登録済み）':'（未登録）';
   $('#linkState').innerHTML=c.has_refresh_token?'<span class="okt">連携済み</span>'+(c.refresh_token_expires?'（'+esc(c.refresh_token_expires)+' まで有効）':'')
     :'未連携';
@@ -1876,8 +1938,8 @@ function fillConf(c){
 async function saveConf(stat){
   const b={};FIELDS.forEach(k=>b[k]=$('#'+k).value);
   b.scrape_sold=$('#scrape_sold').checked;
-  ['anthropic_api_key','client_secret'].forEach(k=>{if($('#'+k).value)b[k]=$('#'+k).value;});
-  try{fillConf(await post('/api/config',b));['anthropic_api_key','client_secret'].forEach(k=>$('#'+k).value='');
+  if($('#client_secret').value)b.client_secret=$('#client_secret').value;
+  try{fillConf(await post('/api/config',b));$('#client_secret').value='';
     stat.innerHTML='<span class="okt">保存しました</span>';}
   catch(e){stat.innerHTML='<span class="err">'+esc(e.message)+'</span>';}
 }
@@ -1889,6 +1951,10 @@ function parseKeys(t){
   const ru=t.match(/RuName[^A-Za-z0-9]*(?:\([^)]*\))?[^A-Za-z0-9]*([A-Za-z0-9_]+(?:-[A-Za-z0-9_]+){3,})/i);
   return {app:app&&app[0],cert:cert&&cert[0],env:(app||cert)&&((app||cert)[0].includes('SBX')?'sandbox':'production'),ru:ru&&ru[1]};
 }
+$('#btnAkSave').onclick=()=>run($('#btnAkSave'),async()=>{
+  fillConf(await post('/api/anthropic/key',{key:$('#anthropic_api_key').value}));
+  $('#anthropic_api_key').value='';$('#akStat').innerHTML='<span class="okt">使えることを確認して保存しました</span>';
+},'確認中',$('#akStat'));
 $('#btnKeyPaste').onclick=()=>run($('#btnKeyPaste'),async()=>{
   const k=parseKeys($('#keyPaste').value);
   if(!k.app&&!k.cert)throw new Error('App ID / Cert ID が見つかりません。キーの欄をまとめてコピーして貼ってください');

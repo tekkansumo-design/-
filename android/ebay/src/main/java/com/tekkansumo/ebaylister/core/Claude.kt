@@ -5,6 +5,9 @@ import com.anthropic.client.okhttp.AnthropicOkHttpClient
 import com.anthropic.core.JsonValue
 import com.anthropic.errors.AnthropicIoException
 import com.anthropic.errors.AnthropicServiceException
+import com.anthropic.errors.BadRequestException
+import com.anthropic.errors.NotFoundException
+import com.anthropic.errors.PermissionDeniedException
 import com.anthropic.errors.RateLimitException
 import com.anthropic.errors.UnauthorizedException
 import com.anthropic.models.beta.messages.BetaBase64ImageSource
@@ -44,6 +47,30 @@ class Claude {
         return cl
     }
 
+    /** キーが使えるかを確かめる。models.retrieve はトークンを使わないので料金はかからない。 */
+    fun checkKey(key: String) {
+        val b = AnthropicOkHttpClient.builder().apiKey(key).maxRetries(1).timeout(Duration.ofSeconds(20))
+        baseUrl?.let { b.baseUrl(it) }
+        val cl = b.build()
+        try {
+            cl.models().retrieve(MODEL)
+        } catch (e: UnauthorizedException) {
+            throw AppError("キーが正しくありません（コピー漏れか、削除されたキーの可能性があります）")
+        } catch (e: PermissionDeniedException) {
+            throw AppError("このキーには使う権限がありません（組織やワークスペースの設定を確認してください）")
+        } catch (e: NotFoundException) {
+            throw AppError("このキーでは $MODEL を使えません")
+        } catch (e: RateLimitException) {
+            // 混雑しているだけならキー自体は有効
+        } catch (e: AnthropicServiceException) {
+            throw AppError("確認できませんでした (${e.statusCode()}): ${e.message}")
+        } catch (e: AnthropicIoException) {
+            throw AppError("Anthropic に接続できません。インターネット接続を確認してください")
+        } finally {
+            cl.close()
+        }
+    }
+
     private fun create(c: JSONObject, b: MessageCreateParams.Builder): BetaMessage {
         // 安全分類器が断ったときに別モデルで自動再実行させる（server-side fallback）
         b.model(MODEL).addBeta(FALLBACK_BETA).fallbacks(BetaFallbacksParam.ofDefault())
@@ -53,6 +80,10 @@ class Claude {
             throw AppError("Anthropic API キーが正しくありません")
         } catch (e: RateLimitException) {
             throw AppError("Anthropic API の利用上限に達しました。しばらく待ってください")
+        } catch (e: BadRequestException) {
+            if ("credit balance" in e.message.orEmpty().lowercase())
+                throw AppError("Anthropic のクレジット残高が足りません。設定タブの「Anthropic API かんたん登録」②からクレジットを購入してください")
+            throw AppError("Anthropic API エラー (${e.statusCode()}): ${e.message}")
         } catch (e: AnthropicServiceException) {
             throw AppError("Anthropic API エラー (${e.statusCode()}): ${e.message}")
         } catch (e: AnthropicIoException) {
