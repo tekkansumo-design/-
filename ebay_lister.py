@@ -239,7 +239,8 @@ class Ebay:
 
     def token(self, conf, kind):
         """kind: app / insights / user"""
-        sig = (conf.get("ebay_env"), conf.get("client_id"), conf.get("refresh_token"))
+        sig = (conf.get("ebay_env"), conf.get("client_id"), conf.get("client_secret"),
+               conf.get("refresh_token"))
         with self._lock:
             hit = self._tokens.get(kind)
             if hit and hit[2] == sig and hit[1] > time.time() + 60:
@@ -1131,6 +1132,75 @@ def api_auth_code():
     return jsonify(public_conf(conf))
 
 
+def explain_ebay_error(msg):
+    """よくある失敗に日本語の対処を添える。"""
+    low = msg.lower()
+    if "invalid_client" in low or "client authentication failed" in low:
+        return msg + "\n→ App ID / Cert ID が違うか、本番と Sandbox の取り違えです。" \
+                     "本番キーは「アカウント削除通知」の設定（手順②）が済むまで使えません"
+    if "invalid_grant" in low:
+        return msg + "\n→ 連携の有効期限切れか取り消しです。手順⑤の「eBay と連携」をやり直してください"
+    if "invalid_scope" in low:
+        return msg + "\n→ このキーには出品の権限がありません。キーの環境（本番/Sandbox）を確認してください"
+    if "20403" in low or "not eligible for business policy" in low or "business polic" in low:
+        return msg + "\n→ ビジネスポリシーが有効になっていません（手順⑥）"
+    return msg
+
+
+@app.post("/api/ebay/test")
+def api_ebay_test():
+    """設定を順に確かめ、どこで止まっているかを返す。"""
+    conf = load_conf()
+    out = []
+
+    def step(label, fn):
+        try:
+            out.append({"ok": True, "label": label, "detail": fn() or ""})
+            return True
+        except (AppError, requests.RequestException) as e:
+            out.append({"ok": False, "label": label, "detail": explain_ebay_error(str(e))})
+            return False
+
+    def anthropic_key():
+        if not (conf.get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY")):
+            raise AppError("未設定です（下の「Anthropic」欄）")
+        return "登録済み"
+
+    def app_keys():
+        EBAY.token(conf, "app")
+        return "App ID / Cert ID は有効です（%s）" % ("Sandbox" if conf["ebay_env"] == "sandbox" else "本番")
+
+    def ru_name():
+        if not conf.get("ru_name"):
+            raise AppError("RuName が未設定です（手順④）")
+        return conf["ru_name"]
+
+    def policies():
+        p = EBAY.policies(conf)
+        counts = {k: len(p[k]) for k in ("fulfillment", "payment", "return", "location")}
+        missing = [n for k, n in (("fulfillment", "送料"), ("payment", "支払"), ("return", "返品"),
+                                  ("location", "発送元")) if not counts[k]]
+        if missing:
+            raise AppError("eBay 側に %s がまだありません" % "・".join(missing))
+        return "送料 %(fulfillment)d・支払 %(payment)d・返品 %(return)d・発送元 %(location)d 件" % counts
+
+    def selected():
+        miss = [n for k, n in (("fulfillment_policy_id", "送料"), ("payment_policy_id", "支払"),
+                               ("return_policy_id", "返品"), ("merchant_location_key", "発送元"))
+                if not conf.get(k)]
+        if miss:
+            raise AppError("%s を選んで保存してください（出品ポリシーと発送元の欄）" % "・".join(miss))
+        return "選択済み"
+
+    step("Anthropic API キー", anthropic_key)
+    if step("eBay のキー（App ID / Cert ID）", app_keys):
+        step("RuName", ru_name)
+        if step("eBay アカウント連携", lambda: (EBAY.token(conf, "user"), "連携済み")[1]):
+            if step("ビジネスポリシーと発送元", policies):
+                step("出品に使うポリシーの選択", selected)
+    return jsonify({"steps": out, "ok": all(s["ok"] for s in out) and len(out) == 6})
+
+
 @app.get("/api/ebay/policies")
 def api_policies():
     return jsonify(EBAY.policies(load_conf()))
@@ -1373,6 +1443,14 @@ details summary{cursor:pointer;color:var(--acc)}
 pre{white-space:pre-wrap;font-size:13px;background:var(--bg);padding:8px;border-radius:7px;max-height:300px;overflow:auto}
 a{color:var(--acc)}
 .req{color:var(--ng);font-weight:700}
+.steps{padding-left:0;list-style:none;counter-reset:st;margin:10px 0}
+.steps>li{counter-increment:st;position:relative;padding:10px 0 10px 40px;border-top:1px solid var(--line)}
+.steps>li::before{content:counter(st);position:absolute;left:0;top:10px;width:28px;height:28px;border-radius:50%;background:var(--line);text-align:center;line-height:28px;font-weight:700}
+.steps>li.done::before{content:"✅";background:none}
+.steps .lnk{display:inline-block;margin-top:6px;text-decoration:none;padding:7px 12px}
+.copyrow{display:flex;gap:8px;align-items:center;margin:6px 0}.copyrow code{background:var(--bg);padding:4px 8px;border-radius:6px}
+.copyrow .cp{padding:4px 10px}
+.tres{list-style:none;padding:0;margin:0}.tres li{padding:4px 0;white-space:pre-wrap}
 </style></head><body>
 <header><h1>eBay 出品アシスタント</h1>
 <nav><button data-tab="list" class="on">出品</button><button data-tab="research">相場リサーチ</button><button data-tab="settings">設定</button></nav>
@@ -1466,9 +1544,42 @@ a{color:var(--acc)}
     <label>API キー <span id="akState" class="muted"></span></label>
     <input id="anthropic_api_key" type="password" placeholder="sk-ant-...（空欄なら変更しない）" autocomplete="off">
   </div>
+  <div class="card" id="wizard">
+    <h2>eBay API かんたん登録</h2>
+    <div class="muted">上から順に進めてください。終わった手順には ✅ が付きます。英語のページは ブラウザの翻訳を使うと楽です。</div>
+    <ol class="steps">
+      <li id="st1"><b>eBay 開発者アカウントを作る</b>
+        <div class="muted">いつもの eBay アカウントとは別の登録です（同じメールアドレスで可）。承認まで最大 1 営業日かかることがあります。</div>
+        <a class="b sub lnk" href="https://developer.ebay.com/signin?tab=register" target="_blank" rel="noopener">登録ページを開く</a></li>
+      <li id="st2"><b>「アカウント削除通知」を免除にする</b>
+        <div class="muted">これをしないと本番のキーが使えません。開いたページの <i>Marketplace Account Deletion</i> で
+          「Exempted from Marketplace Account Deletion」をオンにし、理由に「I do not persist eBay data」を選んで保存します。</div>
+        <a class="b sub lnk" href="https://developer.ebay.com/my/push/" target="_blank" rel="noopener">通知設定を開く</a></li>
+      <li id="st3"><b>キーを作って貼り付ける</b>
+        <div class="muted">開いたページの <i>Production</i> で「Create a keyset」を押し、表示されたキーの欄を<b>まとめてコピー</b>して下に貼ります。App ID と Cert ID を自動で見つけます。</div>
+        <a class="b sub lnk" href="https://developer.ebay.com/my/keys" target="_blank" rel="noopener">キーのページを開く</a>
+        <textarea id="keyPaste" placeholder="App ID (Client ID)  Tekkan-ebaylist-PRD-1a2b3c4d5-6e7f8a9b&#10;Dev ID  ...&#10;Cert ID (Client Secret)  PRD-1a2b3c4d5e6f-..." style="min-height:70px;margin-top:6px"></textarea>
+        <button class="b sub" id="btnKeyPaste" style="margin-top:6px">読み取って保存</button> <span id="keyStat" class="muted"></span></li>
+      <li id="st4"><b>RuName（戻り先の名前）を作る</b>
+        <div class="muted">開いたページで「Get a Token from eBay via Your Application」→「Add eBay Redirect URL」を押し、次の 3 か所に同じ URL を入れて保存します。</div>
+        <div class="copyrow"><code>https://example.com/</code><button class="b sub cp" data-copy="https://example.com/">コピー</button></div>
+        <div class="muted">（Your privacy policy URL / Your auth accepted URL / Your auth declined URL）<br>
+          保存後に表示される <i>RuName (eBay Redirect URL name)</i> の値をコピーして貼ります。</div>
+        <a class="b sub lnk" href="https://developer.ebay.com/my/auth/?env=production&amp;index=0" target="_blank" rel="noopener">User Tokens ページを開く</a>
+        <div class="row" style="margin-top:6px"><input id="ruPaste" placeholder="例: Tekkan_Sumo-TekkanSu-ebayli-abcde">
+          <button class="b sub shrink" id="btnRuPaste">保存</button></div> <span id="ruStat" class="muted"></span></li>
+      <li id="st5"><b>eBay アカウントと連携する</b>
+        <div class="muted">下の「eBay アカウント連携」で「eBay と連携」を押し、同意後に移動した example.com のページの URL を丸ごと貼ります。</div></li>
+      <li id="st6"><b>ビジネスポリシーを用意する</b>
+        <div class="muted">初めての場合は有効化してから、送料・支払・返品のポリシーを作ります。できたら下の「eBay から読み込む」で選んで保存します。</div>
+        <a class="b sub lnk" href="https://www.bizpolicy.ebay.com/businesspolicy/policyoptin" target="_blank" rel="noopener">ポリシーを有効化する</a></li>
+    </ol>
+    <button class="b" id="btnTest">接続テスト</button>
+    <div id="testBox" style="margin-top:8px"></div>
+  </div>
   <div class="card">
     <h2>eBay 開発者キー</h2>
-    <div class="muted"><a href="https://developer.ebay.com/my/keys" target="_blank" rel="noopener">developer.ebay.com</a> の Application Keys と、User Tokens 画面で作る RuName（Your auth accepted URL は任意のページで可）</div>
+    <div class="muted">「かんたん登録」で貼り付けると自動で入ります。手で直す場合はここで。</div>
     <div class="row">
       <div><label>環境</label><select id="ebay_env"><option value="production">本番</option><option value="sandbox">Sandbox（テスト）</option></select></div>
       <div><label>マーケットプレイス</label><select id="marketplace_id"></select></div>
@@ -1751,6 +1862,10 @@ function fillConf(c){
   $('#csState').textContent=c.has_client_secret?'（登録済み）':'（未登録）';
   $('#linkState').innerHTML=c.has_refresh_token?'<span class="okt">連携済み</span>'+(c.refresh_token_expires?'（'+esc(c.refresh_token_expires)+' まで有効）':'')
     :'未連携';
+  const done={st3:c.client_id&&c.has_client_secret,st4:!!c.ru_name,st5:c.has_refresh_token,
+    st6:c.fulfillment_policy_id&&c.payment_policy_id&&c.return_policy_id&&c.merchant_location_key};
+  if(done.st3){done.st1=done.st2=true;}
+  Object.entries(done).forEach(([k,v])=>$('#'+k).classList.toggle('done',!!v));
   document.querySelectorAll('.cur').forEach(e=>e.textContent={EBAY_US:'USD',EBAY_GB:'GBP',EBAY_AU:'AUD',EBAY_CA:'CAD',EBAY_DE:'EUR'}[c.marketplace_id]||'');
 }
 async function saveConf(stat){
@@ -1762,6 +1877,38 @@ async function saveConf(stat){
   catch(e){stat.innerHTML='<span class="err">'+esc(e.message)+'</span>';}
 }
 $('#btnSave').onclick=()=>saveConf($('#saveStat'));
+// キー画面をまるごと貼ると App ID / Cert ID / RuName を拾う
+function parseKeys(t){
+  const app=t.match(/\b[A-Za-z0-9_]+-[A-Za-z0-9_]+-(PRD|SBX)-[0-9a-z]{6,}-[0-9a-z]{6,}\b/);
+  const cert=t.match(/\b(PRD|SBX)-[0-9a-f]{8,}(?:-[0-9a-f]{4}){3,4}(?![0-9a-z-])/i);
+  const ru=t.match(/RuName[^A-Za-z0-9]*(?:\([^)]*\))?[^A-Za-z0-9]*([A-Za-z0-9_]+(?:-[A-Za-z0-9_]+){3,})/i);
+  return {app:app&&app[0],cert:cert&&cert[0],env:(app||cert)&&((app||cert)[0].includes('SBX')?'sandbox':'production'),ru:ru&&ru[1]};
+}
+$('#btnKeyPaste').onclick=()=>run($('#btnKeyPaste'),async()=>{
+  const k=parseKeys($('#keyPaste').value);
+  if(!k.app&&!k.cert)throw new Error('App ID / Cert ID が見つかりません。キーの欄をまとめてコピーして貼ってください');
+  const b={};if(k.app)b.client_id=k.app;if(k.cert)b.client_secret=k.cert;if(k.env)b.ebay_env=k.env;if(k.ru)b.ru_name=k.ru;
+  fillConf(await post('/api/config',b));$('#keyPaste').value='';
+  $('#keyStat').innerHTML='<span class="okt">保存しました: '+[k.app&&'App ID',k.cert&&'Cert ID',k.ru&&'RuName'].filter(Boolean).join('・')
+    +'（'+(k.env==='sandbox'?'Sandbox':'本番')+'）</span>'+(!k.app||!k.cert?'<br><span class="err">'+(!k.app?'App ID':'Cert ID')+' が見つかりませんでした</span>':'');
+},'読み取り中',$('#keyStat'));
+$('#btnRuPaste').onclick=()=>run($('#btnRuPaste'),async()=>{
+  const v=$('#ruPaste').value.trim();const k=parseKeys(v);
+  const ru=k.ru||v.split(/\s+/).find(w=>/^[A-Za-z0-9_]+(-[A-Za-z0-9_]+){3,}$/.test(w)&&!/-(PRD|SBX)-/.test(w));
+  if(!ru)throw new Error('RuName の形になっていません（例: Tekkan_Sumo-TekkanSu-ebayli-abcde）');
+  fillConf(await post('/api/config',{ru_name:ru}));$('#ruPaste').value='';
+  $('#ruStat').innerHTML='<span class="okt">保存しました: '+esc(ru)+'</span>';
+},'保存中',$('#ruStat'));
+document.querySelectorAll('.cp').forEach(b=>b.onclick=async()=>{
+  try{await navigator.clipboard.writeText(b.dataset.copy);b.textContent='コピー済み';}
+  catch(e){prompt('コピーしてください',b.dataset.copy);}
+  setTimeout(()=>b.textContent='コピー',1500);
+});
+$('#btnTest').onclick=()=>run($('#btnTest'),async()=>{
+  const j=await post('/api/ebay/test',{});
+  $('#testBox').innerHTML='<ul class="tres">'+j.steps.map(s=>`<li>${s.ok?'✅':'❌'} <b>${esc(s.label)}</b> ${esc(s.detail)}</li>`).join('')+'</ul>'
+    +(j.ok?'<div class="okt"><b>すべて OK です。出品できます。</b></div>':'');
+},'確認中',$('#testBox'));
 $('#btnSave2').onclick=()=>saveConf($('#saveStat2'));
 $('#btnSave3').onclick=()=>saveConf($('#saveStat3'));
 $('#btnAuth').onclick=()=>{

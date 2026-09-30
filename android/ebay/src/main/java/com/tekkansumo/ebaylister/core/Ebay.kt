@@ -77,7 +77,8 @@ class Ebay(private val http: OkHttpClient) {
 
     @Synchronized
     fun token(c: JSONObject, kind: String): String {
-        val sig = listOf(c.optString("ebay_env"), c.optString("client_id"), c.optString("refresh_token")).joinToString("|")
+        val sig = listOf(c.optString("ebay_env"), c.optString("client_id"), c.optString("client_secret"),
+            c.optString("refresh_token")).joinToString("|")
         tokens[kind]?.let { (t, exp, s) -> if (s == sig && exp > System.currentTimeMillis() + 60_000) return t }
         val j = if (kind == "user") {
             if (c.optString("refresh_token").isEmpty()) throw AppError("eBay アカウントと未連携です（設定タブの「eBay と連携」）")
