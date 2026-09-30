@@ -1374,6 +1374,9 @@ def api_auth_code():
     raw = (body_json().get("code") or "").strip()
     if not raw:
         raise AppError("リダイレクト後の URL か code を貼り付けてください")
+    if "/oauth2/authorize" in raw:
+        raise AppError("これは同意画面を開く URL です。この URL を開いてログインし「同意する（Agree）」を押したあと、"
+                       "移動した先のページの URL（code= が入っています）を貼ってください")
     code = raw
     if "://" in raw or "code=" in raw:
         q = parse_qs(urlparse(raw).query or raw.split("?", 1)[-1])
@@ -1960,7 +1963,8 @@ a{color:var(--acc)}
         <div class="row" style="margin-top:6px"><input id="ruPaste" placeholder="例: Tekkan_Sumo-TekkanSu-ebayli-abcde">
           <button class="b sub shrink" id="btnRuPaste">保存</button></div> <span id="ruStat" class="muted"></span></li>
       <li id="st5"><b>eBay アカウントと連携する</b>
-        <div class="muted">下の「eBay アカウント連携」で「eBay と連携」を押し、同意後に移動した example.com のページの URL を丸ごと貼ります。</div></li>
+        <div class="muted">下の「eBay アカウント連携」で「eBay と連携」を押し、同意後に移動した example.com のページの URL を丸ごと貼ります。
+          Sandbox（テスト）の場合は、普段の eBay アカウントではなく、開発者サイトの「Sandbox users」で作ったテスト用ユーザーでログインします。</div></li>
       <li id="st6"><b>出品の準備を自動で行う</b>
         <div class="muted">ビジネスポリシーの有効化、支払・返品ポリシーの作成、発送元の登録、選択までまとめて行います。
           発送元の郵便番号だけ入れてください。送料ポリシーは送料を決める必要があるので、eBay で 1 つ作ってください（あれば自動で選びます）。</div>

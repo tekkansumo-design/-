@@ -108,6 +108,8 @@ class Api(private val store: ConfStore) {
     private fun authCode(b: JSONObject): JSONObject {
         val raw = b.optString("code").trim()
         if (raw.isEmpty()) throw AppError("リダイレクト後の URL か code を貼り付けてください")
+        if ("/oauth2/authorize" in raw) throw AppError("これは同意画面を開く URL です。この URL を開いてログインし" +
+            "「同意する（Agree）」を押したあと、移動した先のページの URL（code= が入っています）を貼ってください")
         var code = raw
         if ("://" in raw || "code=" in raw) {
             val u = (if ("://" in raw) raw else "https://x/?" + raw.substringAfter("?")).toHttpUrlOrNull()
