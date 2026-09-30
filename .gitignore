@@ -10,3 +10,6 @@ android/app/build/
 android/local.properties
 *.iml
 .idea/
+
+# eBay 出品アシスタント
+ebay_lister_config.json
