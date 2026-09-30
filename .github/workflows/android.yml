@@ -6,6 +6,7 @@ on:
       - 'android/**'
       # 画面の生成元と生成スクリプト。ここを変えても APK に影響する
       - 'bookoff_web.py'
+      - 'ebay_lister.py'
       - 'tools/**'
       - '.github/workflows/android.yml'
   workflow_dispatch:
@@ -20,7 +21,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Check generated asset is up to date
-        run: python3 tools/gen_android_asset.py --check
+        run: |
+          python3 tools/gen_android_asset.py --check
+          python3 tools/gen_ebay_asset.py --check
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -51,6 +54,8 @@ jobs:
           mkdir -p out
           cp android/app/build/outputs/apk/debug/app-debug.apk \
              "out/bookoff-checker-${GITHUB_RUN_NUMBER}.apk"
+          cp android/ebay/build/outputs/apk/debug/ebay-debug.apk \
+             "out/ebay-lister-${GITHUB_RUN_NUMBER}.apk"
           ls -la out
 
       - name: Upload artifact
@@ -63,9 +68,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: apk-${{ github.run_number }}
-          name: BOOKOFF 在庫チェッカー build ${{ github.run_number }}
+          name: Android アプリ build ${{ github.run_number }}
           body: |
             スマホのブラウザでこのページを開き、下の .apk をタップするとインストールできます。
+            - bookoff-checker-*.apk … BOOKOFF 在庫チェッカー
+            - ebay-lister-*.apk … eBay 出品アシスタント
             「提供元不明のアプリ」の許可を求められたら許可してください。
           files: out/*.apk
           generate_release_notes: false

@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 値札。ebay_lister.py の icon_svg() と同じ形（TAG_POLY などから計算） -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4.32"
+        android:strokeLineJoin="round"
+        android:pathData="M35.34,72.66 L35.34,55.35 L55.71,34.98 L73.02,52.29 L52.65,72.66 Z" />
+    <path
+        android:fillColor="@color/ic_launcher_background"
+        android:pathData="M41.52,63.24 a3.24,3.24 0 1,0 6.48,0 a3.24,3.24 0 1,0 -6.48,0 Z" />
+</vector>
