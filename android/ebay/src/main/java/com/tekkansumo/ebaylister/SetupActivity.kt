@@ -32,7 +32,7 @@ import java.util.concurrent.Executors
  * アプリ内ブラウザで各サイトにログインしてもらい、キー類はページから自動で読み取って保存する。
  * 人がやるのはログイン・同意・支払い・送料の決定だけ。
  *
- *   ① Anthropic のキー   console でキーを作ると、表示されたキーを読み取り、使えるか確かめて保存
+ *   ① Anthropic のキー   console でキーを作ると、表示されたキーを読み取り、使えるか確かめて保存（AI を使う設定のときだけ）
  *   ② eBay のキー        keyset を作ると App ID / Cert ID を読み取る。本番で使えなければ削除通知の免除へ
  *   ③ RuName            戻り先 URL の欄を自動入力し、保存後の RuName を読み取る
  *   ④ 連携               同意後の戻り先（code 付き URL）をこの画面で横取りしてトークンに交換
@@ -140,7 +140,8 @@ class SetupActivity : AppCompatActivity() {
         val start = if (after == null) 0 else order.indexOf(after) + 1
         for (s in order.drop(start)) {
             val todo = when (s) {
-                Step.ANTHROPIC -> !c.optBoolean("has_anthropic_api_key")
+                // 無料モードで使うなら AI のキーは要らない
+                Step.ANTHROPIC -> c.optString("ai_mode") == "claude" && !c.optBoolean("has_anthropic_api_key")
                 Step.EBAY_KEYS -> c.optString("client_id").isEmpty() || !c.optBoolean("has_client_secret")
                 Step.EBAY_PUSH -> false                       // キーが本番で弾かれたときだけ入る
                 Step.RUNAME -> c.optString("ru_name").isEmpty()

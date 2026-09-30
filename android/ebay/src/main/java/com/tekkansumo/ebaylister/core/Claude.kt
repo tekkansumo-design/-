@@ -188,26 +188,10 @@ class Claude {
         val b = MessageCreateParams.builder().maxTokens(8000).addUserMessage(prompt)
             .outputConfig(jsonFormat(ASPECTS_SCHEMA, BetaOutputConfig.Effort.LOW))
         val got = firstJson(create(c, b)).optJSONArray("aspects") ?: JSONArray()
-        val defs = aspects.associateBy { it.name.lowercase() }
-        val out = JSONArray()
-        val have = HashSet<String>()
-        for (i in 0 until got.length()) {
-            val g = got.optJSONObject(i) ?: continue
-            val a = defs[g.optString("name").lowercase()] ?: continue
+        return Free.validate(aspects, (0 until got.length()).mapNotNull { got.optJSONObject(it) }.map { g ->
             val arr = g.optJSONArray("values") ?: JSONArray()
-            var vals = (0 until arr.length()).map { arr.optString(it).trim() }.filter { it.isNotEmpty() }
-            if (a.mode == "SELECTION_ONLY" && a.values.isNotEmpty()) {
-                val allowed = a.values.associateBy { it.lowercase() }
-                vals = vals.mapNotNull { allowed[it.lowercase()] }
-            }
-            if (!a.multi) vals = vals.take(1)
-            if (vals.isEmpty()) continue
-            out.put(JSONObject().put("name", a.name).put("value", if (a.multi) vals.joinToString(", ") else vals[0])
-                .put("required", a.required))
-            have.add(a.name)
-        }
-        val missing = JSONArray(aspects.filter { it.required && it.name !in have }.map { it.name })
-        return out to missing
+            g.optString("name") to (0 until arr.length()).map { arr.optString(it) }
+        })
     }
 
     companion object {

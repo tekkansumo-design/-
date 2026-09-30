@@ -24,11 +24,22 @@ class Api(private val store: ConfStore) {
     val ebay = Ebay(http)
     val prices = Prices(http, ebay)
     val claude = Claude()
+    val free = Free(http, ebay)
 
     private class Draft(
         val photos: List<Photo>, val notes: String, val listing: JSONObject, val created: Long,
         var imageUrls: List<String>? = null, var uploadedSig: List<Int>? = null,
+        val refAspects: Map<String, String>? = null,      // 無料モードで手本にした出品の項目
     )
+
+    private fun putDraft(d: Draft): String {
+        val id = token(8)
+        synchronized(drafts) {
+            if (drafts.size >= MAX_DRAFTS) drafts.remove(drafts.minByOrNull { it.value.created }!!.key)
+            drafts[id] = d
+        }
+        return id
+    }
 
     private val drafts = LinkedHashMap<String, Draft>()
     private var oauthState: String? = null
@@ -195,7 +206,10 @@ class Api(private val store: ConfStore) {
             false
         }
         step("Anthropic API キー") {
-            if (c.optString("anthropic_api_key").isEmpty()) throw AppError("未設定です（「Anthropic API かんたん登録」）")
+            if (c.optString("anthropic_api_key").isEmpty()) {
+                if (c.optString("ai_mode") != "claude") return@step "未設定（無料モードで動きます）"
+                throw AppError("未設定です（「Anthropic API かんたん登録」）")
+            }
             claude.checkKey(c.optString("anthropic_api_key"))
             "有効です"
         }
@@ -273,6 +287,19 @@ class Api(private val store: ConfStore) {
         val c = conf()
         val photos = readPhotos(b)
         val hint = b.optString("hint").trim().take(500)
+        val sku = "AI-" + SimpleDateFormat("yyMMddHHmmss", Locale.US).format(Date())
+        if (!Free.useClaude(c)) {
+            val r = free.identify(c, photos, hint, b.optString("jan"))
+            val id = putDraft(Draft(photos, r.notes, r.listing, System.currentTimeMillis(), refAspects = r.refAspects))
+            try {
+                val have = (0 until r.categories.length()).map { r.categories.getJSONObject(it).optString("id") }.toMutableSet()
+                val more = ebay.categorySuggestions(c, r.listing.optString("search_query").ifEmpty { r.listing.optString("ebay_title") })
+                for (i in 0 until more.length()) if (have.add(more.getJSONObject(i).optString("id"))) r.categories.put(more.getJSONObject(i))
+            } catch (e: Exception) { /* 候補の追加は補助 */ }
+            return JSONObject().put("draft_id", id).put("listing", r.listing).put("notes", r.notes)
+                .put("sources", r.sources).put("ebay_hints", JSONArray()).put("categories", r.categories)
+                .put("sku", sku).put("mode", "free")
+        }
         val hasKeys = c.optString("client_id").isNotEmpty() && c.optString("client_secret").isNotEmpty()
         var hints = emptyList<String>()
         if (hasKeys && photos[0].mime == "image/jpeg") {
@@ -280,11 +307,7 @@ class Api(private val store: ConfStore) {
         }
         val (notes, sources) = claude.research(c, photos, hint, hints)
         val listing = claude.draftListing(c, photos, notes, hint)
-        val id = token(8)
-        synchronized(drafts) {
-            if (drafts.size >= MAX_DRAFTS) drafts.remove(drafts.minByOrNull { it.value.created }!!.key)
-            drafts[id] = Draft(photos, notes, listing, System.currentTimeMillis())
-        }
+        val id = putDraft(Draft(photos, notes, listing, System.currentTimeMillis()))
         var cats = JSONArray()
         if (hasKeys) {
             try {
@@ -295,7 +318,7 @@ class Api(private val store: ConfStore) {
         }
         return JSONObject().put("draft_id", id).put("listing", listing).put("notes", notes)
             .put("sources", sources).put("ebay_hints", JSONArray(hints)).put("categories", cats)
-            .put("sku", "AI-" + SimpleDateFormat("yyMMddHHmmss", Locale.US).format(Date()))
+            .put("sku", sku).put("mode", "claude")
     }
 
     private fun draft(id: String): Draft = synchronized(drafts) { drafts[id] }
@@ -311,8 +334,8 @@ class Api(private val store: ConfStore) {
         val did = b.optString("draft_id")
         if (did.isNotEmpty()) {
             val d = draft(did)
-            val product = JSONObject(d.listing.toString()).apply { remove("description_html") }
-            val r = claude.fillAspects(c, product, d.notes, aspects)
+            val r = if (d.refAspects != null) Free.fillAspects(d.listing, d.refAspects, aspects)
+            else claude.fillAspects(c, JSONObject(d.listing.toString()).apply { remove("description_html") }, d.notes, aspects)
             filled = r.first
             missing = r.second
         }

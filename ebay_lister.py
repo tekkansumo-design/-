@@ -47,6 +47,7 @@ import time
 import traceback
 import zlib
 from datetime import datetime
+from html import escape as html_escape
 from html import unescape
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode, urlparse
@@ -114,7 +115,9 @@ DEFAULT_CONF = {
     "merchant_location_key": "",
     "usd_jpy": 150.0,                  # 相場の円換算用（手入力）
     "scrape_sold": True,               # Insights API が使えないとき Sold 検索ページを読む
-    "auto_draft": True,                # 商品特定のあと相場・項目を埋めて eBay に下書き登録まで進める
+    "auto_draft": True,
+    "ai_mode": "auto",                 # auto（キーがあれば Claude、なければ無料）/ free / claude
+    "yahoo_client_id": "",             # 無料モードで JAN から日本語の商品名を引く（任意）                # 商品特定のあと相場・項目を埋めて eBay に下書き登録まで進める
 }
 SECRET_KEYS = ("anthropic_api_key", "client_secret", "refresh_token")
 
@@ -365,10 +368,41 @@ class Ebay:
         return out
 
     def search_by_image(self, conf, jpeg_bytes, limit=8):
+        return [it["title"] for it in self.image_items(conf, jpeg_bytes, limit)]
+
+    @staticmethod
+    def _summary(it):
+        p = it.get("price") or {}
+        cats = it.get("categories") or []
+        leaf = (it.get("leafCategoryIds") or [None])[0] or (cats[0].get("categoryId") if cats else None)
+        name = next((c.get("categoryName") for c in cats if c.get("categoryId") == leaf), None) or \
+            (cats[0].get("categoryName") if cats else "")
+        try:
+            price = float(p.get("value"))
+        except (TypeError, ValueError):
+            price = None
+        return {"title": it.get("title") or "", "item_id": it.get("itemId") or "",
+                "url": it.get("itemWebUrl") or "", "price": price, "currency": p.get("currency"),
+                "category_id": leaf or "", "category_name": name or ""}
+
+    def image_items(self, conf, jpeg_bytes, limit=20):
         j, _ = self.call(conf, "POST", "/buy/browse/v1/item_summary/search_by_image",
                          params={"limit": limit},
                          json={"image": base64.b64encode(jpeg_bytes).decode()})
-        return [it.get("title") for it in j.get("itemSummaries") or [] if it.get("title")]
+        return [self._summary(it) for it in j.get("itemSummaries") or [] if it.get("title")]
+
+    def search_items(self, conf, q=None, gtin=None, limit=20):
+        params = {"limit": limit}
+        if q:
+            params["q"] = q
+        if gtin:
+            params["gtin"] = gtin
+        j, _ = self.call(conf, "GET", "/buy/browse/v1/item_summary/search", params=params)
+        return [self._summary(it) for it in j.get("itemSummaries") or [] if it.get("title")]
+
+    def get_item(self, conf, item_id):
+        j, _ = self.call(conf, "GET", f"/buy/browse/v1/item/{quote(item_id, safe='')}")
+        return j
 
     # ── Marketplace Insights（落札履歴。利用には eBay の個別承認が必要）──
     def search_sold_api(self, conf, q, limit=50):
@@ -839,7 +873,173 @@ def fill_aspects(conf, product, notes, aspects):
                          messages=[{"role": "user", "content": prompt}],
                          output_config={"effort": "low",
                                         "format": {"type": "json_schema", "schema": ASPECTS_SCHEMA}})
-    got = first_json(resp).get("aspects") or []
+    return validate_aspects(aspects, first_json(resp).get("aspects") or [])
+
+
+# ═══════════════════════════════════════════════
+#  無料モード（AI を使わず、バーコードと eBay の画像検索で作る）
+# ═══════════════════════════════════════════════
+TITLE_NOISE = {
+    "new", "used", "free", "shipping", "ship", "fast", "f/s", "from", "with", "and", "the", "for",
+    "of", "a", "an", "in", "w/", "rare", "nm", "mint", "excellent", "lot", "tested", "working",
+    "genuine", "authentic", "official", "very", "good", "condition", "item", "sealed", "brand",
+    "japan", "japanese", "jp", "import", "ver", "version", "near", "box", "only", "fedex", "dhl",
+}
+# 手本にした出品から持ってこない項目（その出品固有の情報）
+SKIP_ASPECTS = {"condition", "seller notes", "item condition", "custom bundle", "modified item",
+                "non-domestic product", "california prop 65 warning", "unit quantity", "unit type"}
+
+
+def _tokens(title):
+    return re.findall(r"[a-z0-9][a-z0-9\-.+/]*", title.lower())
+
+
+def pick_reference(titles):
+    """他のタイトルと一番よく重なるもの（代表）を選ぶ。戻り値は (添字, 一致度 0〜1)。"""
+    sets = [set(_tokens(t)) for t in titles]
+    if len(sets) == 1:
+        return 0, 0.0
+    best, best_score = 0, -1.0
+    for i, a in enumerate(sets):
+        sims = [len(a & b) / len(a | b) for j, b in enumerate(sets) if j != i and (a | b)]
+        score = sum(sims) / len(sims) if sims else 0.0
+        if score > best_score:
+            best, best_score = i, score
+    return best, best_score
+
+
+def common_query(titles, base):
+    """代表タイトルの語のうち、半数以上のタイトルに出てくるものを検索語にする。"""
+    df = {}
+    for t in titles:
+        for w in set(_tokens(t)):
+            df[w] = df.get(w, 0) + 1
+    need = max(2, (len(titles) + 1) // 2) if len(titles) > 1 else 1
+    words = [w for w in _tokens(base) if w not in TITLE_NOISE and len(w) > 1]
+    pick = []
+    for w in words:
+        if df.get(w, 0) >= need and w not in pick:
+            pick.append(w)
+    if len(pick) < 2:
+        pick = list(dict.fromkeys(words))[:5]
+    return " ".join(pick[:6])
+
+
+def clean_title(t):
+    t = re.sub(r"[^\x20-\x7E]", " ", t)          # eBay US は英数字のタイトルが基本
+    return re.sub(r"\s+", " ", t).strip()[:80]
+
+
+def valid_gtin(code):
+    d = re.sub(r"\D", "", code or "")
+    if len(d) not in (8, 12, 13):
+        return ""
+    body, check = d[:-1], int(d[-1])
+    total = sum(int(c) * (3 if (len(body) - i) % 2 == 1 else 1) for i, c in enumerate(body))
+    return d if (10 - total % 10) % 10 == check else ""
+
+
+def yahoo_lookup(conf, jan):
+    """Yahoo!ショッピングの無料 API で JAN から日本語の商品名を引く（Client ID があるときだけ）。"""
+    if not conf.get("yahoo_client_id"):
+        return None
+    try:
+        r = requests.get("https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch",
+                         params={"appid": conf["yahoo_client_id"], "jan_code": jan, "results": 5},
+                         timeout=20)
+        hits = r.json().get("hits") or [] if r.status_code == 200 else []
+    except (requests.RequestException, ValueError):
+        return None
+    if not hits:
+        return None
+    h = hits[0]
+    return {"name": h.get("name") or "", "brand": ((h.get("brand") or {}).get("name") or "")}
+
+
+def free_description(title, specifics):
+    esc_ = lambda v: html_escape(str(v))
+    rows = "".join(f"<li>{esc_(s['name'])}: {esc_(s['value'])}</li>" for s in specifics)
+    japan = "<p>This is a Japanese version item.</p>" if "japan" in title.lower() else ""
+    return (f"<h3>{esc_(title)}</h3>{japan}"
+            + (f"<h3>Specifications</h3><ul>{rows}</ul>" if rows else "")
+            + "<h3>Condition</h3><p>Please check the photos carefully for the exact condition. "
+              "What you see in the photos is what you will receive.</p>"
+              "<h3>Shipping</h3><p>Ships from Japan with tracking. Import duties, taxes and charges "
+              "are not included in the item price and are the buyer's responsibility.</p>")
+
+
+def free_identify(conf, images, hint, jan):
+    """バーコード → 同じ商品の eBay 出品、なければ画像検索、なければヒントで検索して下書きを作る。"""
+    if not (conf.get("client_id") and conf.get("client_secret")):
+        raise AppError("無料モードには eBay のキーが必要です（設定タブの「eBay API かんたん登録」）")
+    gtin = valid_gtin(jan)
+    refs, basis, ja = [], "", None
+    if gtin:
+        refs = EBAY.search_items(conf, gtin=gtin)
+        basis = "gtin"
+        ja = yahoo_lookup(conf, gtin)
+    if not refs and images[0][1] == "image/jpeg":
+        refs = EBAY.image_items(conf, images[0][0])
+        basis = "image"
+    if not refs and re.search(r"[A-Za-z0-9]{3,}", hint or ""):
+        refs = EBAY.search_items(conf, q=" ".join(re.findall(r"[A-Za-z0-9\-]+", hint))[:100])
+        basis = "keyword"
+    if not refs:
+        raise AppError("手がかりが見つかりませんでした。バーコードの写真を加えるか、"
+                       "ヒントに英語の商品名や型番を入れてください")
+    top = refs[:12]
+    idx, score = pick_reference([r["title"] for r in top])
+    ref = top[idx]
+    aspects, brand, mpn = {}, "", ""
+    try:
+        item = EBAY.get_item(conf, ref["item_id"]) if ref["item_id"] else {}
+    except (AppError, requests.RequestException):
+        item = {}
+    for a in item.get("localizedAspects") or []:
+        n, v = (a.get("name") or "").strip(), (a.get("value") or "").strip()
+        if n and v and n.lower() not in SKIP_ASPECTS and n not in aspects:
+            aspects[n] = v
+    brand = item.get("brand") or aspects.get("Brand") or (ja or {}).get("brand") or ""
+    mpn = item.get("mpn") or aspects.get("MPN") or aspects.get("Model") or ""
+    specifics = [{"name": k, "value": v} for k, v in list(aspects.items())[:15]]
+
+    cats, seen = [], set()
+    counts = {}
+    for r in top:
+        if r["category_id"]:
+            counts.setdefault(r["category_id"], [0, r["category_name"]])[0] += 1
+    for cid, (n, name) in sorted(counts.items(), key=lambda kv: -kv[1][0]):
+        cats.append({"id": cid, "name": name, "path": f"{name}（類似出品 {n} 件）"})
+        seen.add(cid)
+
+    title = clean_title(ref["title"])
+    query = common_query([r["title"] for r in top], ref["title"])
+    if basis == "gtin":
+        confidence = "high"
+        how = f"バーコード {gtin} で eBay の同じ商品の出品が {len(refs)} 件見つかりました。"
+    elif basis == "image":
+        confidence = "medium" if score >= 0.3 else "low"
+        how = f"写真に似た eBay の出品 {len(refs)} 件から作りました（一致度 {round(score * 100)}%）。別の商品の可能性があります。"
+    else:
+        confidence = "low"
+        how = f"ヒントの語で eBay を検索した {len(refs)} 件から作りました。"
+    notes_ja = (how + "\n手本にした出品: " + ref["title"] +
+                "\n状態は自動で判定できないので、写真を見て選んでください。説明文はひな形です。")
+    listing = {
+        "identified": True, "confidence": confidence,
+        "product_name_ja": (ja or {}).get("name") or "", "product_name_en": title,
+        "brand": brand, "model_number": mpn, "jan_code": gtin, "search_query": query,
+        "ebay_title": title, "description_html": free_description(title, specifics),
+        "item_specifics": specifics, "condition": "USED_GOOD", "condition_notes": "", "notes_ja": notes_ja,
+    }
+    notes = "無料モード（AI なし）\n" + how + "\n\n参考にした出品:\n" + \
+        "\n".join(f"- {r['title']}  ({r['url']})" for r in top)
+    sources = [{"title": r["title"], "url": r["url"]} for r in top[:8] if r["url"]]
+    return listing, notes, sources, cats, aspects
+
+
+def validate_aspects(aspects, got):
+    """got: [{"name", "values"}] をカテゴリの定義に合わせる。選択式は許可値だけ残す。"""
     defs = {a["name"].lower(): a for a in aspects}
     out = []
     for g in got:
@@ -858,6 +1058,25 @@ def fill_aspects(conf, product, notes, aspects):
     have = {o["name"] for o in out}
     missing = [a["name"] for a in aspects if a["required"] and a["name"] not in have]
     return out, missing
+
+
+def fill_aspects_free(listing, ref_aspects, aspects):
+    """手本にした出品の項目を、カテゴリの項目名に合わせて写す。"""
+    src = dict(ref_aspects)
+    if listing.get("brand"):
+        src.setdefault("Brand", listing["brand"])
+    if listing.get("model_number"):
+        src.setdefault("MPN", listing["model_number"])
+    return validate_aspects(aspects, [{"name": k, "values": [v]} for k, v in src.items()])
+
+
+def use_claude(conf):
+    mode = conf.get("ai_mode") or "auto"
+    if mode == "claude":
+        return True
+    if mode == "free":
+        return False
+    return bool(conf.get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY"))
 
 
 # ═══════════════════════════════════════════════
@@ -1226,6 +1445,8 @@ def api_ebay_test():
 
     def anthropic_key():
         if not (conf.get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY")):
+            if conf.get("ai_mode") != "claude":
+                return "未設定（無料モードで動きます）"
             raise AppError("未設定です（「Anthropic API かんたん登録」）")
         check_anthropic_key(conf.get("anthropic_api_key"))
         return "有効です"
@@ -1347,6 +1568,19 @@ def api_identify():
     conf = load_conf()
     images = read_images()
     hint = (request.form.get("hint") or "").strip()[:500]
+    sku = "AI-" + datetime.now().strftime("%y%m%d%H%M%S")
+    if not use_claude(conf):
+        listing, notes, sources, cats, ref_aspects = free_identify(conf, images, hint, request.form.get("jan"))
+        did = put_draft({"images": images, "notes": notes, "sources": sources, "listing": listing,
+                         "hint": hint, "free": True, "ref_aspects": ref_aspects})
+        try:
+            for c in EBAY.category_suggestions(conf, listing["search_query"] or listing["ebay_title"]):
+                if c["id"] not in {x["id"] for x in cats}:
+                    cats.append(c)
+        except (AppError, requests.RequestException):
+            pass
+        return jsonify({"draft_id": did, "listing": listing, "notes": notes, "sources": sources,
+                        "ebay_hints": [], "categories": cats, "sku": sku, "mode": "free"})
     ebay_hints = []
     if conf.get("client_id") and conf.get("client_secret") and images[0][1] == "image/jpeg":
         try:
@@ -1366,7 +1600,7 @@ def api_identify():
             listing["notes_ja"] = (listing.get("notes_ja", "") + f"\n（カテゴリ候補を取得できませんでした: {e}）").strip()
     return jsonify({"draft_id": did, "listing": listing, "notes": notes,
                     "sources": sources, "ebay_hints": ebay_hints, "categories": cats,
-                    "sku": "AI-" + datetime.now().strftime("%y%m%d%H%M%S")})
+                    "sku": sku, "mode": "claude"})
 
 
 @app.post("/api/categories")
@@ -1388,9 +1622,12 @@ def api_aspects():
     filled, missing = [], []
     if d.get("draft_id"):
         dr = get_draft(d["draft_id"])
-        product = dict(dr["listing"])
-        product.pop("description_html", None)
-        filled, missing = fill_aspects(conf, product, dr["notes"], aspects)
+        if dr.get("free"):
+            filled, missing = fill_aspects_free(dr["listing"], dr.get("ref_aspects") or {}, aspects)
+        else:
+            product = dict(dr["listing"])
+            product.pop("description_html", None)
+            filled, missing = fill_aspects(conf, product, dr["notes"], aspects)
     return jsonify({"aspects": [{k: a[k] for k in ("name", "required", "mode", "multi")}
                                 | {"values": a["values"][:200]} for a in aspects],
                     "filled": filled, "missing": missing})
@@ -1584,13 +1821,16 @@ a{color:var(--acc)}
     <div class="thumbs" id="thumbs"></div>
     <label>ヒント（任意）</label>
     <input id="hint" placeholder="例: 箱なし、動作確認済み / ポケモンカード 1996年版">
+    <label>JAN・バーコード番号（任意。写真に写っていれば自動で読み取ります）</label>
+    <input id="jan" inputmode="numeric" placeholder="例: 4902370548495">
+    <div id="modeNote" class="muted"></div>
     <div style="margin-top:10px"><button class="b" id="btnIdentify">商品を特定して出品文を作る</button>
     <span id="idStat" class="muted"></span></div>
   </div>
 
   <div id="draft" style="display:none">
     <div class="card">
-      <h2>2. 特定結果 <span id="conf" class="pill"></span></h2>
+      <h2>2. 特定結果 <span id="conf" class="pill"></span> <span id="modeBadge" class="pill"></span></h2>
       <div id="prod"></div>
       <div id="notesJa" class="muted" style="white-space:pre-wrap;margin-top:6px"></div>
       <details style="margin-top:8px"><summary>調査メモと情報源</summary>
@@ -1659,7 +1899,22 @@ a{color:var(--acc)}
 
 <section id="tab-settings">
   <div class="card">
-    <h2>Anthropic API かんたん登録 <span id="akState" class="muted"></span></h2>
+    <h2>商品特定の方法</h2>
+    <select id="ai_mode">
+      <option value="auto">自動（Anthropic のキーがあれば AI、なければ無料モード）</option>
+      <option value="free">無料モード（バーコードと eBay の画像検索。AI を使わない）</option>
+      <option value="claude">AI（Claude・有料。精度が高い）</option>
+    </select>
+    <div class="muted" style="margin-top:6px">無料モードは eBay のキーだけで動きます。似た出品を手本にするので、珍しい商品や
+      写真だけでは別の商品になることがあります。バーコードが写っていると確実です。状態は自分で選び、説明文はひな形になります。</div>
+    <label>Yahoo!ショッピングの Client ID（任意・無料）</label>
+    <input id="yahoo_client_id" autocomplete="off" placeholder="入れると JAN から日本語の商品名も出します">
+    <div class="muted"><a href="https://e.developer.yahoo.co.jp/register" target="_blank" rel="noopener">Yahoo! デベロッパーネットワーク</a>で
+      アプリケーションを登録すると無料でもらえます（なくても動きます）。</div>
+    <div style="margin-top:10px"><button class="b" id="btnSave4">保存</button> <span id="saveStat4" class="muted"></span></div>
+  </div>
+  <div class="card">
+    <h2>Anthropic API かんたん登録（AI を使う場合だけ） <span id="akState" class="muted"></span></h2>
     <div class="muted">写真から商品を調べて出品文を作る AI（Claude）の鍵です。Claude.ai の有料プランとは別の契約で、使った分だけ料金がかかります。</div>
     <ol class="steps">
       <li id="as1"><b>Anthropic のアカウントを作る</b>
@@ -1819,9 +2074,36 @@ function shrink(file){
     img.src=url;
   });
 }
+// ── バーコード: 対応端末は BarcodeDetector、なければ ZXing（CDN）で読む ──
+function loadScript(src){return new Promise((ok,ng)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=ng;document.head.appendChild(s);});}
+function validGtin(d){
+  if(!/^(\d{8}|\d{12}|\d{13})$/.test(d))return false;
+  const b=d.slice(0,-1);let t=0;
+  for(let i=0;i<b.length;i++)t+=(+b[i])*((b.length-i)%2===1?3:1);
+  return (10-t%10)%10===+d.slice(-1);
+}
+async function readBarcode(file){
+  try{
+    if('BarcodeDetector' in window){
+      const d=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e']});
+      const r=await d.detect(await createImageBitmap(file));
+      for(const x of r)if(validGtin(x.rawValue))return x.rawValue;
+    }
+  }catch(e){}
+  try{
+    if(!window.ZXing)await loadScript('https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js');
+    const F=ZXing.BarcodeFormat,h=new Map();
+    h.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E]);
+    h.set(ZXing.DecodeHintType.TRY_HARDER,true);
+    const url=URL.createObjectURL(file);
+    try{const r=await new ZXing.BrowserMultiFormatReader(h).decodeFromImageUrl(url);const v=r.getText();if(validGtin(v))return v;}
+    finally{URL.revokeObjectURL(url);}
+  }catch(e){}
+  return '';
+}
 $('#files').onchange=async e=>{
   const fs=[...e.target.files].slice(0,12);
-  PHOTOS=[];$('#thumbs').innerHTML='';
+  PHOTOS=[];$('#thumbs').innerHTML='';$('#jan').value='';
   for(const f of fs){
     try{
       const b=await shrink(f);PHOTOS.push(b);
@@ -1830,6 +2112,9 @@ $('#files').onchange=async e=>{
         `<label title="出品に使う"><input type="checkbox" class="useimg" data-i="${i}" checked><img src="${URL.createObjectURL(b)}"></label>`);
     }catch(err){alert(err.message);}
   }
+  // 写真の取り込みを待たせないよう、読み取りは後から
+  (async()=>{for(const f of fs){if($('#jan').value)break;const v=await readBarcode(f);
+    if(v&&!$('#jan').value){$('#jan').value=v;$('#modeNote').textContent='バーコードを読み取りました: '+v;}}})();
 };
 
 $('#btnIdentify').onclick=()=>{
@@ -1837,6 +2122,7 @@ $('#btnIdentify').onclick=()=>{
   const fd=new FormData();
   PHOTOS.forEach((b,i)=>fd.append('images',b,`photo${i+1}.jpg`));
   fd.append('hint',$('#hint').value);
+  fd.append('jan',$('#jan').value.replace(/\D/g,''));
   const t0=Date.now(),tick=setInterval(()=>{$('#idStat').textContent=` 画像を読み取り、Web で調べています... ${Math.round((Date.now()-t0)/1000)}秒`;},1000);
   run($('#btnIdentify'),async()=>{
     const j=await api('/api/identify',{method:'POST',body:fd});
@@ -1862,6 +2148,7 @@ function showDraft(j){
   $('#draft').style.display='';
   $('#conf').textContent={high:'確度 高',medium:'確度 中',low:'確度 低'}[L.confidence]||'';
   $('#conf').className='pill '+L.confidence;
+  $('#modeBadge').textContent=j.mode==='free'?'無料モード':'AI';
   $('#prod').innerHTML=`<b>${esc(L.product_name_ja||L.product_name_en)}</b><br>
     <span class="muted">${esc(L.product_name_en)}</span><br>
     ブランド: ${esc(L.brand||'-')} / 型番: ${esc(L.model_number||'-')} / JAN: ${esc(L.jan_code||'-')}`
@@ -2008,7 +2295,7 @@ $('#btnDraft').onclick=()=>sendListing(false);
 $('#btnPublish').onclick=()=>sendListing(true);
 
 // ── 設定 ──
-const FIELDS=['ebay_env','marketplace_id','client_id','ru_name','fulfillment_policy_id','payment_policy_id','return_policy_id','merchant_location_key','usd_jpy'];
+const FIELDS=['ebay_env','marketplace_id','client_id','ru_name','fulfillment_policy_id','payment_policy_id','return_policy_id','merchant_location_key','usd_jpy','ai_mode','yahoo_client_id'];
 function ensureOpt(sel,val,label){
   if(val&&![...sel.options].some(o=>o.value===val))sel.insertAdjacentHTML('beforeend',`<option value="${esc(val)}">${esc(label||val)}</option>`);
 }
@@ -2020,6 +2307,8 @@ function fillConf(c){
   $('#scrape_sold').checked=!!c.scrape_sold;
   $('#auto_draft').checked=!!c.auto_draft;
   $('#akState').textContent=c.has_anthropic_api_key?'（登録済み）':c.has_anthropic_env?'（環境変数を使用中）':'（未登録）';
+  const free=c.ai_mode==='free'||(c.ai_mode!=='claude'&&!c.has_anthropic_api_key&&!c.has_anthropic_env);
+  $('#modeNote').textContent=free?'いまは無料モードです（AI を使わず、バーコードと eBay の似た出品から作ります）':'いまは AI（Claude）で調べます';
   ['as1','as2','as3','as4'].forEach(k=>$('#'+k).classList.toggle('done',!!(c.has_anthropic_api_key||c.has_anthropic_env)));
   $('#csState').textContent=c.has_client_secret?'（登録済み）':'（未登録）';
   $('#linkState').innerHTML=c.has_refresh_token?'<span class="okt">連携済み</span>'+(c.refresh_token_expires?'（'+esc(c.refresh_token_expires)+' まで有効）':'')
@@ -2040,6 +2329,7 @@ async function saveConf(stat){
   catch(e){stat.innerHTML='<span class="err">'+esc(e.message)+'</span>';}
 }
 $('#btnSave').onclick=()=>saveConf($('#saveStat'));
+$('#btnSave4').onclick=()=>saveConf($('#saveStat4'));
 // キー画面をまるごと貼ると App ID / Cert ID / RuName を拾う
 function parseKeys(t){
   const app=t.match(/\b[A-Za-z0-9_]+-[A-Za-z0-9_]+-(PRD|SBX)-[0-9a-z]{6,}-[0-9a-z]{6,}\b/);
@@ -2126,7 +2416,7 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch
   $('#condition').innerHTML=META.conditions.map(([k,l])=>`<option value="${k}">${esc(l)}（${k}）</option>`).join('');
   $('#marketplace_id').innerHTML=META.marketplaces.map(m=>`<option>${m}</option>`).join('');
   fillConf(await api('/api/config'));
-  if(!CONF.has_anthropic_api_key&&!CONF.has_anthropic_env||!CONF.client_id)
+  if(!CONF.client_id)
     document.querySelector('nav button[data-tab=settings]').click();
 })();
 </script></body></html>

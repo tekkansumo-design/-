@@ -53,6 +53,8 @@ object Conf {
         put("usd_jpy", 150.0)
         put("scrape_sold", true)
         put("auto_draft", true)
+        put("ai_mode", "auto")
+        put("yahoo_client_id", "")
     }
 
     fun load(store: ConfStore): JSONObject {

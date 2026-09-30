@@ -203,12 +203,37 @@ class Ebay(private val http: OkHttpClient) {
         }
     }
 
-    fun searchByImage(c: JSONObject, jpeg: ByteArray, limit: Int = 8): List<String> {
-        val j = call(c, "POST", "/buy/browse/v1/item_summary/search_by_image", params = mapOf("limit" to limit),
-            json = JSONObject().put("image", Base64.getEncoder().encodeToString(jpeg))).json
+    fun searchByImage(c: JSONObject, jpeg: ByteArray, limit: Int = 8): List<String> =
+        imageItems(c, jpeg, limit).map { it.title }
+
+    private fun summaries(j: JSONObject): List<Summary> {
         val list = j.optJSONArray("itemSummaries") ?: JSONArray()
-        return (0 until list.length()).map { list.getJSONObject(it).optString("title") }.filter { it.isNotEmpty() }
+        return (0 until list.length()).map { list.getJSONObject(it) }.filter { it.optString("title").isNotEmpty() }.map { it ->
+            val cats = it.optJSONArray("categories") ?: JSONArray()
+            val leafs = it.optJSONArray("leafCategoryIds")
+            val leaf = leafs?.optString(0).orEmpty().ifEmpty { cats.optJSONObject(0)?.optString("categoryId").orEmpty() }
+            val name = (0 until cats.length()).map { i -> cats.getJSONObject(i) }
+                .firstOrNull { c2 -> c2.optString("categoryId") == leaf }?.optString("categoryName")
+                ?: cats.optJSONObject(0)?.optString("categoryName").orEmpty()
+            Summary(it.optString("title"), it.optString("itemId"), it.optString("itemWebUrl"), leaf, name)
+        }
     }
+
+    fun imageItems(c: JSONObject, jpeg: ByteArray, limit: Int = 20): List<Summary> = summaries(
+        call(c, "POST", "/buy/browse/v1/item_summary/search_by_image", params = mapOf("limit" to limit),
+            json = JSONObject().put("image", Base64.getEncoder().encodeToString(jpeg))).json)
+
+    fun searchItems(c: JSONObject, q: String? = null, gtin: String? = null, limit: Int = 20): List<Summary> {
+        val params = HashMap<String, Any>().apply {
+            put("limit", limit)
+            if (!q.isNullOrEmpty()) put("q", q)
+            if (!gtin.isNullOrEmpty()) put("gtin", gtin)
+        }
+        return summaries(call(c, "GET", "/buy/browse/v1/item_summary/search", params = params).json)
+    }
+
+    fun getItem(c: JSONObject, itemId: String): JSONObject =
+        call(c, "GET", "/buy/browse/v1/item/" + enc(itemId)).json
 
     // ── Marketplace Insights ──
     fun searchSoldApi(c: JSONObject, q: String, limit: Int = 50): List<PriceItem> {
