@@ -66,6 +66,7 @@ class Api(private val store: ConfStore) {
         "GET /api/ebay/policies" -> ebay.policies(conf())
         "POST /api/ebay/test" -> connectionTest()
         "POST /api/anthropic/key" -> anthropicKey(b)
+        "POST /api/ebay/auto_setup" -> autoSetup(b)
         "POST /api/ebay/location" -> location(b)
         "POST /api/identify" -> identify(b)
         "POST /api/categories" -> {
@@ -115,6 +116,58 @@ class Api(private val store: ConfStore) {
         save(c)
         oauthState = null
         return Conf.public(c)
+    }
+
+    /**
+     * 連携後の出品準備をまとめて行う。何度呼んでもよい（あるものは作らず選ぶだけ）。
+     * 送料ポリシーだけは送料の決定が要るので作らず、あれば選ぶ。ebay_lister.py の api_auto_setup と同じ。
+     */
+    private fun autoSetup(b: JSONObject): JSONObject {
+        val c = conf()
+        val steps = JSONArray()
+        val programs = try { ebay.optedInPrograms(c) } catch (e: EbayError) { emptyList() }
+        if ("SELLING_POLICY_MANAGEMENT" !in programs) {
+            try {
+                ebay.optIn(c, "SELLING_POLICY_MANAGEMENT")
+                steps.put("ビジネスポリシーを有効化しました")
+            } catch (e: EbayError) {
+                if ("already" !in e.message.orEmpty().lowercase()) throw AppError(explain(e.message.orEmpty()))
+            }
+        }
+        val pol = try { ebay.policies(c) } catch (e: EbayError) {
+            throw AppError(explain(e.message.orEmpty()) +
+                "\n（有効化した直後は反映まで数分かかることがあります。少し待ってもう一度お試しください）")
+        }
+        fun one(id: String, name: String) = JSONArray(listOf(JSONObject().put("id", id).put("name", name)))
+        if (pol.getJSONArray("payment").length() == 0) {
+            val id = ebay.createPolicy(c, "payment", JSONObject().put("name", "AI Lister Payment").put("immediatePay", true))
+            pol.put("payment", one(id, "AI Lister Payment"))
+            steps.put("支払ポリシーを作成しました（即時支払い）")
+        }
+        if (pol.getJSONArray("return").length() == 0) {
+            val id = ebay.createPolicy(c, "return", JSONObject().put("name", "AI Lister Returns 30 days")
+                .put("returnsAccepted", true).put("returnPeriod", JSONObject().put("value", 30).put("unit", "DAY"))
+                .put("returnShippingCostPayer", "BUYER"))
+            pol.put("return", one(id, "AI Lister Returns 30 days"))
+            steps.put("返品ポリシーを作成しました（30 日以内・返送料は購入者負担）")
+        }
+        val zip = b.optString("postal_code").filter { it.isDigit() || it == '-' }
+        if (pol.getJSONArray("location").length() == 0 && zip.isNotEmpty()) {
+            ebay.createLocation(c, "JP-HOME", JSONObject().put("postalCode", zip).put("country", "JP"))
+            pol.put("location", one("JP-HOME", "JP-HOME"))
+            steps.put("発送元（〒$zip）を登録しました")
+        }
+        for ((key, kind) in listOf("fulfillment_policy_id" to "fulfillment", "payment_policy_id" to "payment",
+            "return_policy_id" to "return", "merchant_location_key" to "location")) {
+            val list = pol.getJSONArray(kind)
+            val ids = (0 until list.length()).map { list.getJSONObject(it).optString("id") }
+            if (c.optString(key) !in ids) c.put(key, ids.firstOrNull() ?: "")
+        }
+        save(c)
+        return JSONObject().put("steps", steps).put("policies", pol).put("config", Conf.public(c))
+            .put("need_shipping", pol.getJSONArray("fulfillment").length() == 0)
+            .put("need_postal", pol.getJSONArray("location").length() == 0)
+            .put("shipping_url", SHIPPING_POLICY_URL)
     }
 
     /** 貼り付けられた文字からキーを拾い、使えることを確かめてから保存する。 */
@@ -354,6 +407,7 @@ class Api(private val store: ConfStore) {
     }
 
     companion object {
+        const val SHIPPING_POLICY_URL = "https://www.bizpolicy.ebay.com/businesspolicy/manage"
         const val MAX_DRAFTS = 20
         const val MAX_IMAGES = 12
         const val MAX_IMAGE_BYTES = 5 * 1024 * 1024

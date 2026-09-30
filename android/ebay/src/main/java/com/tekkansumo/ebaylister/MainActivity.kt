@@ -86,6 +86,12 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    override fun onResume() {
+        super.onResume()
+        // 自動セットアップから戻ったときに設定の表示を最新にする
+        web.evaluateJavascript("typeof api==='function'&&api('/api/config').then(fillConf).catch(()=>{})", null)
+    }
+
     override fun onDestroy() {
         fileCallback?.onReceiveValue(null)
         fileCallback = null
@@ -149,6 +155,11 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun openUrl(url: String) {
             runOnUiThread { openExternal(Uri.parse(url)) }
+        }
+
+        @JavascriptInterface
+        fun openSetup() {
+            runOnUiThread { startActivity(Intent(this@MainActivity, SetupActivity::class.java)) }
         }
     }
 

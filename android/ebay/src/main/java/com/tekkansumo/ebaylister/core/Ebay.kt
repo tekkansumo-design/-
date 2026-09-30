@@ -247,6 +247,23 @@ class Ebay(private val http: OkHttpClient) {
         return out
     }
 
+    fun optedInPrograms(c: JSONObject): List<String> {
+        val list = call(c, "GET", "/sell/account/v1/program/get_opted_in_programs", kind = "user")
+            .json.optJSONArray("programs") ?: JSONArray()
+        return (0 until list.length()).map { list.getJSONObject(it).optString("programType") }
+    }
+
+    fun optIn(c: JSONObject, program: String) {
+        call(c, "POST", "/sell/account/v1/program/opt_in", kind = "user", json = JSONObject().put("programType", program))
+    }
+
+    /** kind: payment / return。車両以外の全カテゴリ向けに作る。 */
+    fun createPolicy(c: JSONObject, kind: String, body: JSONObject): String {
+        val b = JSONObject(body.toString()).put("marketplaceId", c.optString("marketplace_id"))
+            .put("categoryTypes", JSONArray(listOf(JSONObject().put("name", "ALL_EXCLUDING_MOTORS_VEHICLES"))))
+        return call(c, "POST", "/sell/account/v1/${kind}_policy", kind = "user", json = b).json.optString("${kind}PolicyId")
+    }
+
     fun createLocation(c: JSONObject, key: String, addr: JSONObject) {
         val body = JSONObject().put("location", JSONObject().put("address", addr))
             .put("locationTypes", JSONArray(listOf("WAREHOUSE"))).put("name", key)

@@ -52,6 +52,7 @@ object Conf {
         put("marketplace_id", "EBAY_US")
         put("usd_jpy", 150.0)
         put("scrape_sold", true)
+        put("auto_draft", true)
     }
 
     fun load(store: ConfStore): JSONObject {

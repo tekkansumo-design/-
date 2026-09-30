@@ -114,6 +114,7 @@ DEFAULT_CONF = {
     "merchant_location_key": "",
     "usd_jpy": 150.0,                  # 相場の円換算用（手入力）
     "scrape_sold": True,               # Insights API が使えないとき Sold 検索ページを読む
+    "auto_draft": True,                # 商品特定のあと相場・項目を埋めて eBay に下書き登録まで進める
 }
 SECRET_KEYS = ("anthropic_api_key", "client_secret", "refresh_token")
 
@@ -406,6 +407,21 @@ class Ebay:
                             "name": l.get("name") or l.get("merchantLocationKey")}
                            for l in j.get("locations") or []]
         return out
+
+    def opted_in_programs(self, conf):
+        j, _ = self.call(conf, "GET", "/sell/account/v1/program/get_opted_in_programs", kind="user")
+        return [p.get("programType") for p in j.get("programs") or []]
+
+    def opt_in(self, conf, program):
+        self.call(conf, "POST", "/sell/account/v1/program/opt_in", kind="user",
+                  json={"programType": program})
+
+    def create_policy(self, conf, kind, body):
+        """kind: payment / return。車両以外の全カテゴリ向けに作る。"""
+        body = dict(body, marketplaceId=conf["marketplace_id"],
+                    categoryTypes=[{"name": "ALL_EXCLUDING_MOTORS_VEHICLES"}])
+        j, _ = self.call(conf, "POST", f"/sell/account/v1/{kind}_policy", kind="user", json=body)
+        return j.get(f"{kind}PolicyId")
 
     def create_location(self, conf, key, addr):
         body = {"location": {"address": addr},
@@ -1249,6 +1265,60 @@ def api_ebay_test():
     return jsonify({"steps": out, "ok": all(s["ok"] for s in out) and len(out) == 6})
 
 
+SHIPPING_POLICY_URL = "https://www.bizpolicy.ebay.com/businesspolicy/manage"
+
+
+@app.post("/api/ebay/auto_setup")
+def api_auto_setup():
+    """連携後の出品準備をまとめて行う。何度呼んでもよい（あるものは作らず選ぶだけ）。
+
+    送料ポリシーだけは送料の決定が要るので作らず、あれば選ぶ。
+    """
+    d = body_json()
+    conf = load_conf()
+    steps = []
+    try:
+        programs = EBAY.opted_in_programs(conf)
+    except EbayError:
+        programs = []
+    if "SELLING_POLICY_MANAGEMENT" not in programs:
+        try:
+            EBAY.opt_in(conf, "SELLING_POLICY_MANAGEMENT")
+            steps.append("ビジネスポリシーを有効化しました")
+        except EbayError as e:
+            if "already" not in str(e).lower():
+                raise AppError(explain_ebay_error(str(e)))
+    try:
+        pol = EBAY.policies(conf)
+    except EbayError as e:
+        raise AppError(explain_ebay_error(str(e)) +
+                       "\n（有効化した直後は反映まで数分かかることがあります。少し待ってもう一度お試しください）")
+    if not pol["payment"]:
+        pid = EBAY.create_policy(conf, "payment", {"name": "AI Lister Payment", "immediatePay": True})
+        pol["payment"] = [{"id": pid, "name": "AI Lister Payment"}]
+        steps.append("支払ポリシーを作成しました（即時支払い）")
+    if not pol["return"]:
+        rid = EBAY.create_policy(conf, "return", {
+            "name": "AI Lister Returns 30 days", "returnsAccepted": True,
+            "returnPeriod": {"value": 30, "unit": "DAY"}, "returnShippingCostPayer": "BUYER"})
+        pol["return"] = [{"id": rid, "name": "AI Lister Returns 30 days"}]
+        steps.append("返品ポリシーを作成しました（30 日以内・返送料は購入者負担）")
+    zip_code = re.sub(r"[^0-9-]", "", str(d.get("postal_code") or ""))
+    if not pol["location"] and zip_code:
+        EBAY.create_location(conf, "JP-HOME", {"postalCode": zip_code, "country": "JP"})
+        pol["location"] = [{"id": "JP-HOME", "name": "JP-HOME"}]
+        steps.append(f"発送元（〒{zip_code}）を登録しました")
+    for key, items in (("fulfillment_policy_id", pol["fulfillment"]), ("payment_policy_id", pol["payment"]),
+                       ("return_policy_id", pol["return"]), ("merchant_location_key", pol["location"])):
+        ids = [i["id"] for i in items]
+        if conf.get(key) not in ids:
+            conf[key] = ids[0] if ids else ""
+    save_conf(conf)
+    return jsonify({"steps": steps, "policies": pol, "config": public_conf(conf),
+                    "need_shipping": not pol["fulfillment"], "need_postal": not pol["location"],
+                    "shipping_url": SHIPPING_POLICY_URL})
+
+
 @app.get("/api/ebay/policies")
 def api_policies():
     return jsonify(EBAY.policies(load_conf()))
@@ -1636,10 +1706,14 @@ a{color:var(--acc)}
           <button class="b sub shrink" id="btnRuPaste">保存</button></div> <span id="ruStat" class="muted"></span></li>
       <li id="st5"><b>eBay アカウントと連携する</b>
         <div class="muted">下の「eBay アカウント連携」で「eBay と連携」を押し、同意後に移動した example.com のページの URL を丸ごと貼ります。</div></li>
-      <li id="st6"><b>ビジネスポリシーを用意する</b>
-        <div class="muted">初めての場合は有効化してから、送料・支払・返品のポリシーを作ります。できたら下の「eBay から読み込む」で選んで保存します。</div>
-        <a class="b sub lnk" href="https://www.bizpolicy.ebay.com/businesspolicy/policyoptin" target="_blank" rel="noopener">ポリシーを有効化する</a></li>
+      <li id="st6"><b>出品の準備を自動で行う</b>
+        <div class="muted">ビジネスポリシーの有効化、支払・返品ポリシーの作成、発送元の登録、選択までまとめて行います。
+          発送元の郵便番号だけ入れてください。送料ポリシーは送料を決める必要があるので、eBay で 1 つ作ってください（あれば自動で選びます）。</div>
+        <div class="row" style="margin-top:6px"><input id="autoZip" placeholder="発送元の郵便番号（例: 150-0001）" inputmode="numeric">
+          <button class="b shrink" id="btnAutoSetup2">自動で設定する</button></div>
+        <div id="autoStat" class="muted"></div></li>
     </ol>
+    <button class="b ok" id="btnAutoSetup" style="display:none;margin-bottom:8px">アプリ内で自動セットアップ（ログインだけで登録）</button>
     <button class="b" id="btnTest">接続テスト</button>
     <div id="testBox" style="margin-top:8px"></div>
   </div>
@@ -1692,6 +1766,8 @@ a{color:var(--acc)}
   <div class="card">
     <h2>相場</h2>
     <label>円換算レート（1 USD = ? 円）</label><input id="usd_jpy" inputmode="decimal">
+    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="auto_draft" style="width:auto">
+      商品を特定したら、項目の入力・相場調査・eBay への下書き登録（非公開）まで自動で進める</label>
     <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="scrape_sold" style="width:auto">
       Insights API が使えないときは eBay の Sold 検索ページから読み取る</label>
     <div class="muted">落札履歴の公式 API（Marketplace Insights）は eBay の個別承認が必要です。ページ読み取りは eBay の利用規約上グレーで、構造変更やロボット判定で取れなくなることがあります。</div>
@@ -1765,8 +1841,21 @@ $('#btnIdentify').onclick=()=>{
   run($('#btnIdentify'),async()=>{
     const j=await api('/api/identify',{method:'POST',body:fd});
     showDraft(j);$('#idStat').textContent='';
-  },'調査中...',$('#idStat')).finally(()=>clearInterval(tick));
+    return true;
+  },'調査中...',$('#idStat')).finally(()=>clearInterval(tick)).then(ok=>{if(ok)autoChain();});
 };
+
+// 特定のあと、項目の入力 → 相場 → 下書き登録（非公開）まで自動で進める。公開だけは手で押す
+async function autoChain(){
+  if(!CONF.auto_draft)return;
+  if($('#catId').value&&!await doAspects())return;
+  if(!await doPrice())return;
+  const ready=CONF.fulfillment_policy_id&&CONF.payment_policy_id&&CONF.return_policy_id&&CONF.merchant_location_key;
+  if(!ready){$('#listResult').innerHTML='<span class="muted">設定タブで出品の準備を済ませると、ここで自動的に下書き登録します。</span>';return;}
+  if(!$('#price').value){$('#listResult').innerHTML='<span class="muted">相場が取れなかったので価格を入れて「下書き登録」を押してください。</span>';return;}
+  await sendListing(false);
+  $('#btnPublish').scrollIntoView({behavior:'smooth',block:'center'});
+}
 
 function showDraft(j){
   DRAFT=j;const L=j.listing;
@@ -1791,7 +1880,7 @@ function showDraft(j){
   ASPDEF={};
   $('#aspects').innerHTML='';
   (L.item_specifics||[]).forEach(a=>addAsp(a.name,a.value));
-  $('#priceBox').innerHTML='';$('#listResult').innerHTML='';
+  $('#priceBox').innerHTML='';$('#listResult').innerHTML='';$('#price').value='';
   $('#draft').scrollIntoView({behavior:'smooth'});
 }
 function updLen(){const n=$('#title').value.length;$('#tlen').textContent=n+' / 80';$('#tlen').className=n>80?'err':'muted';}
@@ -1836,10 +1925,11 @@ function collectAsp(){
     return {name,value:tr.querySelector('.av').value.trim(),multi:!!(ASPDEF[name]&&ASPDEF[name].multi)};
   }).filter(a=>a.name&&a.value);
 }
-$('#btnAspects').onclick=()=>{
+$('#btnAspects').onclick=()=>doAspects();
+function doAspects(){
   const cid=$('#catId').value.trim();
-  if(!cid){alert('カテゴリ ID を入れてください');return;}
-  run($('#btnAspects'),async()=>{
+  if(!cid){alert('カテゴリ ID を入れてください');return Promise.resolve(false);}
+  return run($('#btnAspects'),async()=>{
     const j=await post('/api/aspects',{category_id:cid,draft_id:DRAFT&&DRAFT.draft_id});
     ASPDEF={};j.aspects.forEach(a=>ASPDEF[a.name]=a);
     const cur={};collectAsp().forEach(a=>cur[a.name]=a.value);
@@ -1852,8 +1942,9 @@ $('#btnAspects').onclick=()=>{
     Object.entries(cur).forEach(([k,v])=>{if(!done.has(k)&&!ASPDEF[k])addAsp(k,v);});
     $('#aspStat').innerHTML=j.missing.length?'<span class="err">必須で未入力: '+j.missing.map(esc).join(', ')+'</span>'
       :'<span class="okt">必須項目はすべて入力済み</span>';
+    return true;
   },'AI が入力中...',$('#aspStat'));
-};
+}
 
 // ── 相場 ──
 function money(v,cur){return v==null?'-':(cur==='USD'?'$':cur+' ')+Number(v).toFixed(2);}
@@ -1882,32 +1973,35 @@ $('#btnResearch').onclick=()=>{
   run($('#btnResearch'),async()=>{$('#researchBox').innerHTML=researchHtml(await post('/api/research',{q}),false);},'調査中',$('#researchBox'));
 };
 $('#rq').onkeydown=e=>{if(e.key==='Enter')$('#btnResearch').click();};
-$('#btnPrice').onclick=()=>{
+$('#btnPrice').onclick=()=>doPrice();
+function doPrice(){
   const q=DRAFT&&DRAFT.listing.search_query||$('#title').value;
-  run($('#btnPrice'),async()=>{
+  return run($('#btnPrice'),async()=>{
     const j=await post('/api/research',{q});
     $('#priceBox').innerHTML=(j.suggested?`<p>推奨価格: <b>${money(j.suggested,j.currency)}</b>${yen(j.suggested,j)} <span class="muted">(${esc(j.suggested_basis)})</span>
       <button class="b sub" id="usePrice" style="padding:4px 10px">この価格にする</button></p>`:'')
       +`<div class="muted">検索語: ${esc(q)}（相場リサーチタブで変えて調べ直せます）</div>`+researchHtml(j,true);
     if(j.suggested)$('#usePrice').onclick=()=>{$('#price').value=j.suggested.toFixed(2);};
     if(j.suggested&&!$('#price').value)$('#price').value=j.suggested.toFixed(2);
+    return true;
   },'調査中',$('#priceBox'));
-};
+}
 
 // ── 送信 ──
 function sendListing(publish){
-  if(!DRAFT)return;
-  if(publish&&!confirm('eBay に公開出品します。よろしいですか？'))return;
+  if(!DRAFT)return Promise.resolve(false);
+  if(publish&&!confirm('eBay に公開出品します。よろしいですか？'))return Promise.resolve(false);
   const idx=[...document.querySelectorAll('.useimg')].filter(c=>c.checked).map(c=>+c.dataset.i);
   const body={draft_id:DRAFT.draft_id,publish,sku:$('#sku').value,title:$('#title').value,description:$('#desc').value,
     condition:$('#condition').value,condition_notes:$('#condNotes').value,category_id:$('#catId').value,
     price:$('#price').value,quantity:$('#qty').value,aspects:collectAsp(),image_indexes:idx};
   const btn=publish?$('#btnPublish'):$('#btnDraft');
-  run(btn,async()=>{
+  return run(btn,async()=>{
     const j=await post('/api/list',body);
     $('#listResult').innerHTML='<ul>'+j.steps.map(s=>'<li class="okt">'+esc(s)+'</li>').join('')+'</ul>'
       +(j.url?`<a href="${esc(j.url)}" target="_blank" rel="noopener"><b>出品ページを開く</b></a>`
-             :`<span class="muted">未公開です。「出品する」で公開できます。</span>`);
+             :`<span class="muted">未公開です。内容を確認して「出品する」で公開できます。</span>`);
+    return true;
   },'送信中...',$('#listResult'));
 }
 $('#btnDraft').onclick=()=>sendListing(false);
@@ -1924,6 +2018,7 @@ function fillConf(c){
     const s=$('#'+k);if(!s.options.length)s.innerHTML='<option value="">（未選択）</option>';ensureOpt(s,c[k]);});
   FIELDS.forEach(k=>{$('#'+k).value=c[k]??'';});
   $('#scrape_sold').checked=!!c.scrape_sold;
+  $('#auto_draft').checked=!!c.auto_draft;
   $('#akState').textContent=c.has_anthropic_api_key?'（登録済み）':c.has_anthropic_env?'（環境変数を使用中）':'（未登録）';
   ['as1','as2','as3','as4'].forEach(k=>$('#'+k).classList.toggle('done',!!(c.has_anthropic_api_key||c.has_anthropic_env)));
   $('#csState').textContent=c.has_client_secret?'（登録済み）':'（未登録）';
@@ -1938,6 +2033,7 @@ function fillConf(c){
 async function saveConf(stat){
   const b={};FIELDS.forEach(k=>b[k]=$('#'+k).value);
   b.scrape_sold=$('#scrape_sold').checked;
+  b.auto_draft=$('#auto_draft').checked;
   if($('#client_secret').value)b.client_secret=$('#client_secret').value;
   try{fillConf(await post('/api/config',b));$('#client_secret').value='';
     stat.innerHTML='<span class="okt">保存しました</span>';}
@@ -1996,15 +2092,27 @@ $('#btnCode').onclick=()=>run($('#btnCode'),async()=>{
   fillConf(await post('/api/ebay/auth_code',{code:$('#authCode').value}));
   $('#authCode').value='';$('#authStat').innerHTML='<span class="okt">連携しました</span>';
 },'交換中',$('#authStat'));
-$('#btnPol').onclick=()=>run($('#btnPol'),async()=>{
-  const p=await api('/api/ebay/policies');
+function fillPolicies(p){
   const fill=(k,list)=>{const s=$('#'+k);
     s.innerHTML='<option value="">（未選択）</option>'+list.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
     ensureOpt(s,CONF[k]);s.value=CONF[k]||(list.length===1?list[0].id:'');};
   fill('fulfillment_policy_id',p.fulfillment);fill('payment_policy_id',p.payment);
   fill('return_policy_id',p.return);fill('merchant_location_key',p.location);
+}
+$('#btnPol').onclick=()=>run($('#btnPol'),async()=>{
+  fillPolicies(await api('/api/ebay/policies'));
   $('#polStat').innerHTML='<span class="okt">読み込みました。選んで「保存」してください</span>';
 },'読込中',$('#polStat'));
+$('#btnAutoSetup2').onclick=()=>run($('#btnAutoSetup2'),async()=>{
+  const j=await post('/api/ebay/auto_setup',{postal_code:$('#autoZip').value});
+  fillConf(j.config);fillPolicies(j.policies);
+  $('#autoStat').innerHTML=(j.steps.length?'<ul class="tres">'+j.steps.map(s=>'<li class="okt">✅ '+esc(s)+'</li>').join('')+'</ul>':'')
+    +(j.need_postal?'<div class="err">発送元がありません。郵便番号を入れてもう一度押してください</div>':'')
+    +(j.need_shipping?`<div class="err">送料ポリシーがまだありません。<a href="${esc(j.shipping_url)}" target="_blank" rel="noopener">eBay で送料ポリシーを作る</a>と、もう一度押したときに自動で選びます</div>`:'')
+    +(!j.need_postal&&!j.need_shipping?'<div class="okt"><b>出品の準備ができました</b></div>':'');
+},'設定中',$('#autoStat'));
+// アプリ版だけ: ログインだけで登録できるアプリ内セットアップ
+if(window.App&&App.openSetup){$('#btnAutoSetup').style.display='';$('#btnAutoSetup').onclick=()=>App.openSetup();}
 $('#btnLoc').onclick=()=>run($('#btnLoc'),async()=>{
   const j=await post('/api/ebay/location',{key:$('#locKey').value,country:$('#locCountry').value,
     postalCode:$('#locZip').value,stateOrProvince:$('#locState').value,city:$('#locCity').value});
