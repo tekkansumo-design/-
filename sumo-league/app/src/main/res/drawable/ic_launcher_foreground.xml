@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 土俵（俵の輪と仕切り線） -->
+    <path
+        android:fillColor="#E8B04A"
+        android:pathData="M54,30 A24,24 0 1,1 53.99,30 Z M54,35 A19,19 0 1,0 54.01,35 Z" />
+    <path
+        android:fillColor="#F4EFE4"
+        android:pathData="M45,47 L48,47 L48,61 L45,61 Z" />
+    <path
+        android:fillColor="#F4EFE4"
+        android:pathData="M60,47 L63,47 L63,61 L60,61 Z" />
+</vector>

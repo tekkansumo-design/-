@@ -1,0 +1,66 @@
+name: Sumo League APK
+
+on:
+  push:
+    paths:
+      - 'sumo-league/**'
+      - '.github/workflows/sumo-league.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-sumo-${{ hashFiles('sumo-league/**/*.gradle.kts', 'sumo-league/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-sumo-
+
+      - name: Build debug APK
+        working-directory: sumo-league
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Rename APK
+        run: |
+          mkdir -p out
+          cp sumo-league/app/build/outputs/apk/debug/app-debug.apk \
+             "out/sumo-league-${GITHUB_RUN_NUMBER}.apk"
+          ls -la out
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sumo-league-apk
+          path: out/*.apk
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: sumo-league-${{ github.run_number }}
+          name: 相撲リーグ一部 対戦表 build ${{ github.run_number }}
+          body: |
+            第75回 東日本学生相撲リーグ戦 一部の対戦表アプリです。
+            スマホのブラウザでこのページを開き、下の .apk をタップするとインストールできます。
+            「提供元不明のアプリ」の許可を求められたら許可してください。
+          files: out/*.apk
+          generate_release_notes: false

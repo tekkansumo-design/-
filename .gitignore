@@ -10,3 +10,7 @@ android/app/build/
 android/local.properties
 *.iml
 .idea/
+sumo-league/.gradle/
+sumo-league/build/
+sumo-league/app/build/
+sumo-league/local.properties
