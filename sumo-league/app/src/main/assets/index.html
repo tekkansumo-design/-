@@ -107,9 +107,6 @@ textarea{width:100%;min-height:120px;font-family:monospace;font-size:11px;border
 .opt .cls{font-size:11px;color:var(--sub)}
 .opt.cur{border-color:var(--navy);background:#eef1f7}
 .opt.out{opacity:.55}
-.seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:8px 0 12px}
-.seg button{flex:1;border:0;background:#fff;padding:9px 4px;font-size:13px;font-weight:700}
-.seg button.on{background:var(--navy);color:#fff}
 .chk{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--sub);margin:4px 0 10px}
 .secl{font-size:12px;color:var(--sub);margin:10px 2px 6px;font-weight:700}
 input.txt{width:100%;font:inherit;padding:10px;border:1px solid var(--line);border-radius:8px;margin-bottom:10px}
@@ -252,18 +249,12 @@ function lineup(teamId, r){
 function roundOfTeam(teamId, r){ // そのチームの r 回戦の対戦
   return SCHEDULE[r].findIndex(m => m[0] === teamId || m[1] === teamId);
 }
-function setSub(teamId, pos, r, pid, onlyThis){
-  const before = lineup(teamId, r)[pos];
-  const nextBefore = r + 1 < NR ? lineup(teamId, r + 1)[pos] : null;
+function setSub(teamId, pos, r, pid){
   const s = state.subs[teamId] = state.subs[teamId] || {};
   const m = s[pos] = s[pos] || {};
+  // この回戦から最終回戦まで同じ選手にする（以降の回戦の指定は上書き）
   m[r] = pid;
-  if (onlyThis) {
-    if (r + 1 < NR && m[r + 1] == null) m[r + 1] = nextBefore;
-  } else {
-    // 「この回戦のみ」で残した戻し先（交代前の選手）は上書きする
-    for (let k = r + 1; k < NR; k++) if (m[k] === before) delete m[k];
-  }
+  for (let k = r + 1; k < NR; k++) delete m[k];
   // 直前の回戦と同じ選手を指す冗長な指定を掃除
   for (let k = 0; k < NR; k++) {
     if (m[k] == null) continue;
@@ -461,7 +452,7 @@ function renderMenu(){
 // ───────── 交代シート ─────────
 let sheetCtx = null;
 function openSub(teamId, pos, r){
-  sheetCtx = {teamId, pos, r, onlyThis:false, showAll:false};
+  sheetCtx = {teamId, pos, r, showAll:false};
   drawSheet();
   $('#veil').classList.add('on'); $('#sheet').classList.add('on');
 }
@@ -470,7 +461,7 @@ function eligible(pid, pos){
   return lim == null || (pl != null && pl <= lim);
 }
 function drawSheet(){
-  const {teamId, pos, r, onlyThis, showAll} = sheetCtx, t = T[teamId];
+  const {teamId, pos, r, showAll} = sheetCtx, t = T[teamId];
   const lu = lineup(teamId, r), cur = lu[pos], starter = t.starterIds[pos];
   const inLineup = new Set(lu);
   const cands = t.subIds.filter(id => !inLineup.has(id));
@@ -482,9 +473,7 @@ function drawSheet(){
       ${id === cur ? '<span class="cls">出場中</span>' : ''}</button>`;
   };
   let h = `<div class="grip"></div><h3>${esc(t.name)}　${POS[pos].k}<span style="font-size:12px;color:var(--sub);font-weight:400">（${clsLabel(POS[pos].lim)}）</span></h3>
-    <div class="sub">${r + 1}回戦　現在：<b>${esc(pname(cur))}</b></div>
-    <div class="seg"><button data-act="mode" data-v="0" class="${!onlyThis ? 'on' : ''}">${r + 1}回戦以降すべて</button>
-      <button data-act="mode" data-v="1" class="${onlyThis ? 'on' : ''}">この回戦のみ</button></div>`;
+    <div class="sub">${r + 1}回戦　現在：<b>${esc(pname(cur))}</b><br>選んだ選手は${r + 1}回戦以降のすべての対戦に出場します。</div>`;
   if (cur !== starter) {
     h += `<div class="secl">先発に戻す</div>` + (inLineup.has(starter) ? `<div class="hint">先発の${esc(pname(starter))}は別の位置で出場中です。</div>` : opt(starter));
   }
@@ -538,13 +527,12 @@ document.addEventListener('click', ev => {
       save(); render(); break;
     }
     case 'sub': openSub(d.t, +d.i, +d.r); break;
-    case 'mode': sheetCtx.onlyThis = d.v === '1'; drawSheet(); break;
     case 'all': sheetCtx.showAll = el.checked; drawSheet(); break;
     case 'pick': {
-      const {teamId, pos, r, onlyThis} = sheetCtx;
-      setSub(teamId, pos, r, d.p, onlyThis);
+      const {teamId, pos, r} = sheetCtx;
+      setSub(teamId, pos, r, d.p);
       closeSheet(); render();
-      toast(`${POS[pos].k}：${pname(d.p)}（${onlyThis ? r + 1 + '回戦のみ' : r + 1 + '回戦以降'}）`);
+      toast(`${POS[pos].k}：${pname(d.p)}（${r + 1}回戦以降）`);
       break;
     }
     case 'rename': renameSheet(d.p); break;
