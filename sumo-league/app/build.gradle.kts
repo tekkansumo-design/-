@@ -11,8 +11,8 @@ android {
         minSdk = 26
         // 35 にすると Android 15 で全画面表示が強制され、WebView がステータスバーに潜る
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
     }
 
     buildTypes {

@@ -106,8 +106,6 @@ textarea{width:100%;min-height:120px;font-family:monospace;font-size:11px;border
 .opt .on{flex:1}
 .opt .cls{font-size:11px;color:var(--sub)}
 .opt.cur{border-color:var(--navy);background:#eef1f7}
-.opt.out{opacity:.55}
-.chk{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--sub);margin:4px 0 10px}
 .secl{font-size:12px;color:var(--sub);margin:10px 2px 6px;font-weight:700}
 input.txt{width:100%;font:inherit;padding:10px;border:1px solid var(--line);border-radius:8px;margin-bottom:10px}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#222;color:#fff;padding:9px 16px;
@@ -362,7 +360,7 @@ function renderMatches(){
 function dups(ids){ const seen = new Set(), d = new Set(); ids.forEach(x => { if (seen.has(x)) d.add(x); seen.add(x); }); return d; }
 function nameCell(teamId, pid, pos, r, mi, side, dup){
   const pl = P[pid], subbed = T[teamId].starterIds[pos] !== pid;
-  const tag = dup ? '<span class="tag warn">重複</span>' : subbed ? '<span class="tag">交代</span>' : '';
+  const tag = dup ? '<span class="tag warn">重複</span>' : subbed && !eligible(pid, pos) ? '<span class="tag warn">階級違い</span>' : subbed ? '<span class="tag">交代</span>' : '';
   const n = `<span class="n${pname(pid).length > 8 ? ' long' : ''}">${side === 'w' ? tag : ''}${esc(pname(pid))}${side === 'e' ? tag : ''}</span>`;
   return `<div class="nm ${side} ${subbed ? 'subbed' : ''} ${dup ? 'dup' : ''}" data-act="sub" data-t="${teamId}" data-i="${pos}" data-r="${r}">
     ${n}<span class="d">${esc(pl.dan === '-' ? '' : pl.dan + '段・')}${pl.gr}年</span></div>`;
@@ -452,20 +450,19 @@ function renderMenu(){
 // ───────── 交代シート ─────────
 let sheetCtx = null;
 function openSub(teamId, pos, r){
-  sheetCtx = {teamId, pos, r, showAll:false};
+  sheetCtx = {teamId, pos, r};
   drawSheet();
   $('#veil').classList.add('on'); $('#sheet').classList.add('on');
 }
+// 交代は同じ階級の選手どうしに限る（先鋒⇔100kg未満、二陣⇔115kg未満、四陣⇔85kg未満、その他⇔無差別）
 function eligible(pid, pos){
-  const lim = POS[pos].lim, pl = P[pid].lim;
-  return lim == null || (pl != null && pl <= lim);
+  return P[pid].lim === POS[pos].lim;
 }
 function drawSheet(){
-  const {teamId, pos, r, showAll} = sheetCtx, t = T[teamId];
+  const {teamId, pos, r} = sheetCtx, t = T[teamId];
   const lu = lineup(teamId, r), cur = lu[pos], starter = t.starterIds[pos];
   const inLineup = new Set(lu);
-  const cands = t.subIds.filter(id => !inLineup.has(id));
-  const ok = cands.filter(id => eligible(id, pos)), ng = cands.filter(id => !eligible(id, pos));
+  const ok = t.subIds.filter(id => !inLineup.has(id) && eligible(id, pos));
   const opt = (id, extra) => {
     const pl = P[id];
     return `<button class="opt ${id === cur ? 'cur' : ''} ${extra || ''}" data-act="pick" data-p="${id}">
@@ -477,12 +474,8 @@ function drawSheet(){
   if (cur !== starter) {
     h += `<div class="secl">先発に戻す</div>` + (inLineup.has(starter) ? `<div class="hint">先発の${esc(pname(starter))}は別の位置で出場中です。</div>` : opt(starter));
   }
-  h += `<div class="secl">控え選手</div>`;
-  h += ok.length ? ok.map(id => opt(id)).join('') : `<div class="hint">この階級で出られる控え選手がいません。</div>`;
-  if (ng.length) {
-    h += `<label class="chk"><input type="checkbox" data-act="all" ${showAll ? 'checked' : ''}> 登録階級が上の控え選手も表示（${ng.length}人）</label>`;
-    if (showAll) h += ng.map(id => opt(id, 'out')).join('');
-  }
+  h += `<div class="secl">控え選手（${clsLabel(POS[pos].lim)}）</div>`;
+  h += ok.length ? ok.map(id => opt(id)).join('') : `<div class="hint">交代できる${clsLabel(POS[pos].lim)}の控え選手がいません。</div>`;
   h += `<div class="secl">その他</div>
     <button class="btn" data-act="rename" data-p="${cur}">「${esc(pname(cur))}」の名前を修正</button>
     <button class="btn" data-act="close">閉じる</button>`;
@@ -527,7 +520,6 @@ document.addEventListener('click', ev => {
       save(); render(); break;
     }
     case 'sub': openSub(d.t, +d.i, +d.r); break;
-    case 'all': sheetCtx.showAll = el.checked; drawSheet(); break;
     case 'pick': {
       const {teamId, pos, r} = sheetCtx;
       setSub(teamId, pos, r, d.p);
