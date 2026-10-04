@@ -11,13 +11,28 @@ android {
         minSdk = 26
         // 35 にすると Android 15 で全画面表示が強制され、WebView がステータスバーに潜る
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
+    }
+
+    // CI はビルドのたびに使い捨ての debug 鍵で署名するため、そのままだと
+    // 署名が毎回変わって上書きインストールできない。固定の鍵で署名する。
+    signingConfigs {
+        create("fixed") {
+            storeFile = file("sumo-league.keystore")
+            storePassword = "android"
+            keyAlias = "sumoleague"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("fixed")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("fixed")
         }
     }
 
