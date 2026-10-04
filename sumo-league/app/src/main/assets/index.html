@@ -454,9 +454,10 @@ function openSub(teamId, pos, r){
   drawSheet();
   $('#veil').classList.add('on'); $('#sheet').classList.add('on');
 }
-// 交代は同じ階級の選手どうしに限る（先鋒⇔100kg未満、二陣⇔115kg未満、四陣⇔85kg未満、その他⇔無差別）
+// 交代は同じ階級以下の控え選手に限る（無差別の位置には全員、115kg未満の位置には85・100・115kg未満の選手など）
 function eligible(pid, pos){
-  return P[pid].lim === POS[pos].lim;
+  const lim = POS[pos].lim, pl = P[pid].lim;
+  return lim == null || (pl != null && pl <= lim);
 }
 function drawSheet(){
   const {teamId, pos, r} = sheetCtx, t = T[teamId];
@@ -474,8 +475,8 @@ function drawSheet(){
   if (cur !== starter) {
     h += `<div class="secl">先発に戻す</div>` + (inLineup.has(starter) ? `<div class="hint">先発の${esc(pname(starter))}は別の位置で出場中です。</div>` : opt(starter));
   }
-  h += `<div class="secl">控え選手（${clsLabel(POS[pos].lim)}）</div>`;
-  h += ok.length ? ok.map(id => opt(id)).join('') : `<div class="hint">交代できる${clsLabel(POS[pos].lim)}の控え選手がいません。</div>`;
+  h += `<div class="secl">控え選手（${POS[pos].lim == null ? '全階級から' : POS[pos].lim + 'kg未満までの階級から'}選べます）</div>`;
+  h += ok.length ? ok.map(id => opt(id)).join('') : `<div class="hint">この位置（${clsLabel(POS[pos].lim)}）に交代できる控え選手がいません。</div>`;
   h += `<div class="secl">その他</div>
     <button class="btn" data-act="rename" data-p="${cur}">「${esc(pname(cur))}」の名前を修正</button>
     <button class="btn" data-act="close">閉じる</button>`;
