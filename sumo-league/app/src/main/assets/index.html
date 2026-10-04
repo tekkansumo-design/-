@@ -275,10 +275,10 @@ function score(r, mi){
 }
 function standings(){
   const S = {};
-  TEAMS.forEach(t => S[t.id] = {id:t.id, win:0, lose:0, draw:0, pts:0, lost:0, played:0, vs:{}});
+  TEAMS.forEach(t => S[t.id] = {id:t.id, win:0, lose:0, draw:0, pts:0, played:0, vs:{}});
   SCHEDULE.forEach((ms, r) => ms.forEach(([E, W], mi) => {
     const s = score(r, mi);
-    S[E].pts += s.e; S[E].lost += s.w; S[W].pts += s.w; S[W].lost += s.e;
+    S[E].pts += s.e; S[W].pts += s.w;
     if (!s.any) return;
     S[E].vs[W] = {my:s.e, op:s.w, res:s.winner === 'E' ? 'W' : s.winner === 'W' ? 'L' : s.winner === 'D' ? 'D' : '', r};
     S[W].vs[E] = {my:s.w, op:s.e, res:s.winner === 'W' ? 'W' : s.winner === 'E' ? 'L' : s.winner === 'D' ? 'D' : '', r};
@@ -289,10 +289,10 @@ function standings(){
       else { S[E].draw++; S[W].draw++; }
     }
   }));
-  const arr = Object.values(S).sort((a, b) => b.win - a.win || b.pts - a.pts || a.lost - b.lost);
+  const arr = Object.values(S).sort((a, b) => b.win - a.win || b.pts - a.pts);
   arr.forEach((x, i) => {
     const p = arr[i - 1];
-    x.rank = (p && p.win === x.win && p.pts === x.pts && p.lost === x.lost) ? p.rank : i + 1;
+    x.rank = (p && p.win === x.win && p.pts === x.pts) ? p.rank : i + 1;
   });
   return {arr, S};
 }
@@ -367,12 +367,12 @@ function nameCell(teamId, pid, pos, r, mi, side, dup){
 }
 function renderStand(){
   const {arr, S} = standings();
-  let h = `<h2>勝数得点表</h2><table class="st"><tr><th>順位</th><th>大学</th><th>勝数</th><th>敗</th><th>得点</th><th>失点</th></tr>`;
+  let h = `<h2>勝数得点表</h2><table class="st"><tr><th>順位</th><th>大学</th><th>勝数</th><th>敗</th><th>得点</th></tr>`;
   arr.forEach(x => {
     h += `<tr class="${x.rank === 1 && x.played ? 'r1' : ''}"><td class="rank">${x.played ? x.rank : '-'}</td><td class="team">${esc(T[x.id].name)}</td>
-      <td><b>${x.win}</b></td><td>${x.lose}${x.draw ? '<small> 分' + x.draw + '</small>' : ''}</td><td><b>${x.pts}</b></td><td>${x.lost}</td></tr>`;
+      <td><b>${x.win}</b></td><td>${x.lose}${x.draw ? '<small> 分' + x.draw + '</small>' : ''}</td><td><b>${x.pts}</b></td></tr>`;
   });
-  h += `</table><div class="hint" style="margin-top:6px">順位は 勝数 → 得点（個人の勝ち数合計）→ 失点の少なさ で自動計算。同じ値は同順位。</div>`;
+  h += `</table><div class="hint" style="margin-top:6px">順位は 勝数 → 得点（個人の勝ち数合計）の順で自動計算。同じ値は同順位。</div>`;
   h += `<h2>星取表</h2><div class="matrix-wrap"><table class="mx"><tr><th></th>${TEAMS.map(t => `<th>${esc(t.ab)}</th>`).join('')}<th>勝</th><th>点</th></tr>`;
   TEAMS.forEach(a => {
     h += `<tr><th>${esc(a.ab)}</th>`;
