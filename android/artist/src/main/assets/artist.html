@@ -71,7 +71,7 @@ border:1px solid #3a2c1d;border-radius:12px;padding:2px 10px;white-space:nowrap}
 <div class="row">
 <label class="ck"><input type="checkbox" id="gCd" checked>CD</label>
 <label class="ck"><input type="checkbox" id="gDvd" checked>DVD・BD</label>
-<label class="num">定価との差<input type="number" id="minDiff" value="500" min="0" step="100">円以上</label>
+<label class="num">Amazon中古との差<input type="number" id="minDiff" value="500" min="0" step="100">円以上</label>
 </div>
 <details><summary>検索方法</summary>
 <div class="row">
@@ -138,13 +138,14 @@ function render(){
   const run=S.running;
   $('#bRun').style.display=run?'none':''; $('#bStop').style.display=run?'':'none';
   $('#bar').classList.toggle('on',run&&S.phase==='list');
-  const pct=S.phase==='stores'&&S.targets?Math.round(S.done/S.targets*100):(S.phase==='done'?100:(run?100:0));
+  const pct=S.phase==='stores'&&S.listed?Math.round(S.done/S.listed*100):(S.phase==='done'?100:(run?100:0));
   $('#bar div').style.width=pct+'%';
   $('#stat').textContent=S.message||'';
   if(S.phase==='idle'){ $('#sum').innerHTML=''; renderMain(); return; }
-  let sum=`中古 <b>${S.listed}</b> 件中、定価より${S.minDiff}円以上安い <b>${S.targets}</b> 件`;
+  let sum=`中古 <b>${S.listed}</b> 件 → 店舗在庫あり <b>${S.withStores}</b> 件 → Amazon中古より${S.minDiff}円以上安い <b>${S.targets}</b> 件`;
   sum+=` ／ 在庫店舗 <b>${S.stores.length}</b> 店`;
-  const ex=[]; if(S.below) ex.push(`差額不足 ${S.below}`); if(S.noDiff) ex.push(`定価表示なし ${S.noDiff}`);
+  const ex=[]; if(S.below) ex.push(`差額不足 ${S.below}`); if(S.noAmazon) ex.push(`Amazon価格なし ${S.noAmazon}`);
+  if(S.noStores) ex.push(`店舗在庫なし ${S.noStores}`);
   if(S.unmatched) ex.push(`名前不一致 ${S.unmatched}`);
   if(ex.length) sum+=`<br>除外: ${ex.join('、')}`;
   $('#sum').innerHTML=sum;
@@ -157,18 +158,23 @@ function render(){
   renderMain();
 }
 
+// ブックオフ価格 / Amazon 中古最安値 / 差額
+function priceLine(p){
+  const amz=p.amazon==null?'Amazon中古 —':(p.amzUrl?`<a href="${esc(p.amzUrl)}">Amazon中古 ${yen(p.amazon)}</a>`:`Amazon中古 ${yen(p.amazon)}`);
+  return `ブックオフ ${yen(p.price)} / ${amz}${p.gap!=null?` <b>差 ${p.gap.toLocaleString()}円</b>`:''}`;
+}
 function itemLine(p){
-  return `<li><span class="g">${esc(p.genre)}</span><a href="${esc(p.url)}">${esc(p.title)}</a> `+
-    `<span class="pr">${yen(p.price)}${p.diff!=null?` <b>定価より${p.diff.toLocaleString()}円安</b>`:''}${p.pct!=null?`(${p.pct}%)`:''}</span></li>`;
+  return `<li><span class="g">${esc(p.genre)}</span><a href="${esc(p.url)}">${esc(p.title)}</a><br>`+
+    `<span class="pr">${priceLine(p)}</span></li>`;
 }
 
 function renderMain(){
   const m=$('#main');
   if(!S||S.phase==='idle'){
     m.innerHTML=`<div class="empty"><span class="big">CD・DVD の在庫店舗を探します</span>`+
-      `アーティスト名で中古の CD / DVD を検索し、<br>定価との差が指定額以上の商品だけについて<br>`+
+      `アーティスト名で中古の CD / DVD を検索し、<br>Amazon の中古最安値よりブックオフが<br>指定額以上安い商品だけについて<br>`+
       `入荷している店舗を集計し、在庫数の多い店舗から並べます。</div>`+
-      `<div class="note">※ 店舗在庫はブックオフのサイトに表示される「商品が入荷した店舗」の情報です。少し前の情報のため、店頭では売り切れの場合があります。</div>`;
+      `<div class="note">※ 店舗在庫はブックオフのサイトに表示される「商品が入荷した店舗」の情報です。少し前の情報のため、店頭では売り切れの場合があります。<br>※ 差額は「Amazon の中古最安値（送料別）− ブックオフ オンラインの中古価格」です。Amazon は JAN コードで検索します。</div>`;
     return;
   }
   if(tab==='stores'){
@@ -188,13 +194,15 @@ function renderMain(){
     });
     m.innerHTML=h;
   }else{
-    if(!S.products.length){ m.innerHTML=`<div class="empty">${S.running?'検索中…':'条件に合う商品はありませんでした'}</div>`; return; }
+    if(!S.products.length){ m.innerHTML=`<div class="empty">${S.running?'確認中…':'条件に合う商品はありませんでした'}</div>`; return; }
     // 商品 → その商品がある店舗。S.stores は在庫数の多い順なので、その順のまま並ぶ
     const byP={};
     S.stores.forEach(s=>s.items.forEach(i=>(byP[i]=byP[i]||[]).push(s)));
-    const ps=S.products.slice().sort((a,b)=>b.count-a.count||(b.diff||0)-(a.diff||0));
+    const ps=S.products.slice().sort((a,b)=>(b.hit-a.hit)||b.count-a.count||(b.gap||0)-(a.gap||0));
+    let shownMiss=false;
     m.innerHTML=ps.map(p=>{
-      const badge=!p.checked?'<div class="badge z">未確認</div>':`<div class="badge${p.count?'':' z'}">${p.count}店</div>`;
+      const head=(!p.hit&&!shownMiss)?(shownMiss=true,`<div class="note" style="margin:16px 0 8px">店舗在庫はあるが Amazon の中古価格を取れなかった商品</div>`):'';
+      const badge=`<div class="badge${p.hit?'':' z'}">${p.count}店</div>`;
       const all=byP[p.i]||[], list=all.filter(s=>!pref||s.pref===pref);
       const key='p'+p.i, isOpen=open.has(key), can=all.length>0;
       let stores='';
@@ -205,10 +213,9 @@ function renderMain(){
         }).join(''):`<li class="pr">${esc(pref)} の店舗にはありません</li>`)+`</ul>`;
       }
       const hint=!can||isOpen?'':`<div class="more">タップで在庫店舗を表示${pref?`（${esc(pref)} ${list.length}店）`:''}</div>`;
-      return `<div class="card${isOpen?' open':''}"${can?` data-k="${key}"`:''}><div class="chead"><div class="ttl"><span class="g">${esc(p.genre)}</span>`+
+      return head+`<div class="card${isOpen?' open':''}"${can?` data-k="${key}"`:''}><div class="chead"><div class="ttl"><span class="g">${esc(p.genre)}</span>`+
         `<a href="${esc(p.url)}">${esc(p.title)}</a><span class="addr">${esc(p.artist)}</span></div>${badge}</div>`+
-        `<div class="pr" style="margin-top:4px">${yen(p.price)}${p.diff!=null?` <b>定価より${p.diff.toLocaleString()}円安</b>`:''}`+
-        `${p.online?' ・オンライン在庫あり':''}</div>`+
+        `<div class="pr" style="margin-top:4px">${priceLine(p)}</div>`+
         `${p.error?`<div class="err">${esc(p.error)}</div>`:''}${stores}${hint}</div>`;
     }).join('');
   }

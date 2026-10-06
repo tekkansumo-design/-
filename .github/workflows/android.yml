@@ -70,7 +70,7 @@ jobs:
             スマホの Chrome でこのページを開き、下の .apk をタップするとインストールできます。
             「提供元不明のアプリ」の許可を求められたら許可してください。
 
-            - bookoff-search-*.apk … BOOKOFF検索（アーティスト名で CD / DVD を検索し、定価より指定額以上安い商品の在庫店舗を在庫数の多い順に表示）
+            - bookoff-search-*.apk … BOOKOFF検索（アーティスト名で CD / DVD を検索し、Amazon 中古最安値より指定額以上安い商品の在庫店舗を在庫数の多い順に表示）
             - bookoff-checker-*.apk … BOOKOFF在庫（商品ID を登録して在庫店舗をチェック。別アプリ）
           files: out/*.apk
           generate_release_notes: false

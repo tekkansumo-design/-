@@ -13,8 +13,8 @@ android {
         minSdk = 26
         targetSdk = 35
         // build 27 で同じ ID・同じ鍵のものを配ったので、上書きできるよう大きくする
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
     }
 
     // 毎回同じ鍵で署名し、新しいビルドを上書きインストールできるようにする

@@ -39,6 +39,7 @@ class ArtistActivity : AppCompatActivity() {
 
     private lateinit var web: WebView
     private lateinit var shadow: WebView
+    private lateinit var amz: WebView
     private val main = Handler(Looper.getMainLooper())
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -54,6 +55,17 @@ class ArtistActivity : AppCompatActivity() {
             visibility = View.INVISIBLE
         }
         root.addView(shadow, FrameLayout.LayoutParams(400, 800))
+
+        // Amazon 取得用。amazon.co.jp のページを開いておき、その中から fetch() する
+        // （同一オリジンなので Cookie も効き、TLS も本物の Chrome になる）
+        amz = WebView(this).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.blockNetworkImage = true
+            visibility = View.INVISIBLE
+            addJavascriptInterface(AmzBridge(), "AmzBridge")
+        }
+        root.addView(amz, FrameLayout.LayoutParams(400, 800))
 
         web = WebView(this)
         web.settings.apply {
@@ -80,12 +92,15 @@ class ArtistActivity : AppCompatActivity() {
         web.loadUrl("file:///android_asset/artist.html")
 
         ArtistSearch.renderer = { url -> render(url) }
+        ArtistSearch.amazonFetch = { url -> amazonFetch(url) }
     }
 
     override fun onDestroy() {
         ArtistSearch.renderer = null
+        ArtistSearch.amazonFetch = null
         web.destroy()
         shadow.destroy()
+        amz.destroy()
         super.onDestroy()
     }
 
@@ -132,6 +147,72 @@ class ArtistActivity : AppCompatActivity() {
             return null
         }
         out
+    }
+
+    // ───────────────────────── Amazon ─────────────────────────
+
+    private class Pending {
+        val latch = CountDownLatch(1)
+        var status = -1
+        var body = ""
+    }
+
+    private val pending = HashMap<Int, Pending>()
+    private var nextId = 1
+    private val amzLock = Object()
+
+    /** fetch() の結果を JS から受け取る。 */
+    inner class AmzBridge {
+        @JavascriptInterface
+        fun done(id: Int, status: Int, body: String) {
+            val p = synchronized(pending) { pending.remove(id) } ?: return
+            p.status = status
+            p.body = body
+            p.latch.countDown()
+        }
+    }
+
+    /** amz が amazon.co.jp のページを開いている状態にする。 */
+    private fun ensureAmazonOrigin(): Boolean {
+        val ok = CountDownLatch(1)
+        var already = false
+        main.post {
+            val cur = amz.url ?: ""
+            if (cur.startsWith(AmazonParser.BASE)) {
+                already = true
+                ok.countDown()
+            } else {
+                var fired = false
+                amz.webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView?, u: String?) {
+                        if (fired || u == null || !u.startsWith(AmazonParser.BASE)) return
+                        fired = true
+                        ok.countDown()
+                    }
+                }
+                // 軽いページで足りる。オリジンと Cookie が欲しいだけ
+                amz.loadUrl(AmazonParser.BASE + "/gp/help/customer/display.html")
+            }
+        }
+        return ok.await(40, TimeUnit.SECONDS) || already
+    }
+
+    /** 作業スレッドから呼ばれる。(HTTP ステータス, 本文) を返す。失敗は null。 */
+    private fun amazonFetch(url: String): Pair<Int, String>? = synchronized(amzLock) {
+        if (isFinishing || isDestroyed) return null
+        if (!ensureAmazonOrigin()) return null
+        val p = Pending()
+        val id = synchronized(pending) { val i = nextId++; pending[i] = p; i }
+        val js = "(function(){fetch(" + JSONObject.quote(url) + ",{credentials:'include'," +
+                "headers:{'Accept':'text/html,*/*'}})" +
+                ".then(function(r){return r.text().then(function(t){AmzBridge.done($id,r.status,t);});})" +
+                ".catch(function(e){AmzBridge.done($id,-1,String(e));});})()"
+        main.post { amz.evaluateJavascript(js, null) }
+        if (!p.latch.await(40, TimeUnit.SECONDS)) {
+            synchronized(pending) { pending.remove(id) }
+            return null
+        }
+        if (p.status < 0) null else Pair(p.status, p.body)
     }
 
     private fun keepScreenOn(on: Boolean) {

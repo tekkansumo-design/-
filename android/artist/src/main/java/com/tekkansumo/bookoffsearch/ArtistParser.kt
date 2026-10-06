@@ -165,6 +165,16 @@ object ArtistParser {
         return StoreHit(name, address, url, pref)
     }
 
+    private val GTIN13 = Regex("\"gtin13\"\\s*:\\s*\"(\\d{13})\"")
+    private val GTIN = Regex("\"gtin(?:8|12|14)?\"\\s*:\\s*\"(\\d{8,14})\"")
+    private val JAN_TEXT = Regex("JAN[^0-9]{0,20}(\\d{13}|\\d{8})")
+
+    /** 商品ページの JAN コード（JSON-LD の gtin13、無ければ本文の「JAN」表記）。 */
+    fun parseJan(html: String): String? =
+        GTIN13.find(html)?.groupValues?.get(1)
+            ?: GTIN.find(html)?.groupValues?.get(1)
+            ?: JAN_TEXT.find(html)?.groupValues?.get(1)
+
     // ───────────────────────── 名前の照合 ─────────────────────────
 
     /** 全角英数・空白・記号ゆれを吸収して比較用にする。 */
