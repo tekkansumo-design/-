@@ -31,7 +31,7 @@
             android:name=".ArtistActivity"
             android:exported="true"
             android:label="@string/artist_name"
-            android:taskAffinity="com.tekkansumo.bookoffchecker.artist"
+            android:taskAffinity="com.tekkansumo.bookoffsearch.artist"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
             android:launchMode="singleTask">
             <intent-filter>

@@ -8,7 +8,8 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.tekkansumo.bookoffchecker"
+        // 旧ビルド（使い捨て鍵で署名）が端末に残っていても競合しないよう ID を分ける
+        applicationId = "com.tekkansumo.bookoffsearch"
         minSdk = 26
         targetSdk = 35
         versionCode = 2
