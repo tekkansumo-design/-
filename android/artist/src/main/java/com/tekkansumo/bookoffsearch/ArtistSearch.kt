@@ -375,6 +375,26 @@ object ArtistSearch {
                 sb.append('\n')
             }
         }
+
+        // 商品別の在庫店舗（店舗の並びは在庫数の多い順のまま）
+        val byProduct = HashMap<Int, MutableList<String>>()
+        for (k in 0 until stores.length()) {
+            val s = stores.getJSONObject(k)
+            if (!prefFilter.isNullOrEmpty() && s.optString("pref") != prefFilter) continue
+            val items = s.getJSONArray("items")
+            for (j in 0 until items.length()) {
+                byProduct.getOrPut(items.getInt(j)) { ArrayList() }.add(s.optString("name"))
+            }
+        }
+        if (byProduct.isNotEmpty()) {
+            sb.append("\n■ 商品別\n")
+            for (i in byProduct.keys.sortedByDescending { byProduct[it]!!.size }) {
+                val p = products.getJSONObject(i)
+                val names = byProduct[i]!!
+                sb.append("・[${p.optString("genre")}] ${p.optString("title")}（${names.size}店）\n")
+                sb.append("   ${names.joinToString("、")}\n")
+            }
+        }
         return sb.toString()
     }
 }

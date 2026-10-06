@@ -189,14 +189,27 @@ function renderMain(){
     m.innerHTML=h;
   }else{
     if(!S.products.length){ m.innerHTML=`<div class="empty">${S.running?'検索中…':'条件に合う商品はありませんでした'}</div>`; return; }
+    // 商品 → その商品がある店舗。S.stores は在庫数の多い順なので、その順のまま並ぶ
+    const byP={};
+    S.stores.forEach(s=>s.items.forEach(i=>(byP[i]=byP[i]||[]).push(s)));
     const ps=S.products.slice().sort((a,b)=>b.count-a.count||(b.diff||0)-(a.diff||0));
     m.innerHTML=ps.map(p=>{
       const badge=!p.checked?'<div class="badge z">未確認</div>':`<div class="badge${p.count?'':' z'}">${p.count}店</div>`;
-      return `<div class="card"><div class="chead"><div class="ttl"><span class="g">${esc(p.genre)}</span>`+
+      const all=byP[p.i]||[], list=all.filter(s=>!pref||s.pref===pref);
+      const key='p'+p.i, isOpen=open.has(key), can=all.length>0;
+      let stores='';
+      if(can){
+        stores=`<ul class="items">`+(list.length?list.map(s=>{
+          const nm=s.url?`<a href="${esc(s.url)}">${esc(s.name)}</a>`:esc(s.name);
+          return `<li><b>${nm}</b> <span class="pr">${esc(s.address||s.pref||'')}・この店の対象在庫 ${s.items.length}点</span></li>`;
+        }).join(''):`<li class="pr">${esc(pref)} の店舗にはありません</li>`)+`</ul>`;
+      }
+      const hint=!can||isOpen?'':`<div class="more">タップで在庫店舗を表示${pref?`（${esc(pref)} ${list.length}店）`:''}</div>`;
+      return `<div class="card${isOpen?' open':''}"${can?` data-k="${key}"`:''}><div class="chead"><div class="ttl"><span class="g">${esc(p.genre)}</span>`+
         `<a href="${esc(p.url)}">${esc(p.title)}</a><span class="addr">${esc(p.artist)}</span></div>${badge}</div>`+
         `<div class="pr" style="margin-top:4px">${yen(p.price)}${p.diff!=null?` <b>定価より${p.diff.toLocaleString()}円安</b>`:''}`+
         `${p.online?' ・オンライン在庫あり':''}</div>`+
-        `${p.error?`<div class="err">${esc(p.error)}</div>`:''}</div>`;
+        `${p.error?`<div class="err">${esc(p.error)}</div>`:''}${stores}${hint}</div>`;
     }).join('');
   }
 }
