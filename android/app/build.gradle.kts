@@ -11,11 +11,26 @@ android {
         applicationId = "com.tekkansumo.bookoffchecker"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
+    }
+
+    // CI は実行ごとに使い捨ての debug 鍵で署名するため、ビルドが変わるたびに
+    // 「既存のパッケージと競合」で上書きインストールできなかった。
+    // 鍵をリポジトリに固定して、毎回同じ署名にする。
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("ci-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
         }
