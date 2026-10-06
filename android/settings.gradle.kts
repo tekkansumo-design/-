@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "BookoffChecker"
-include(":app")
+include(":app", ":artist")

@@ -1,4 +1,4 @@
-package com.tekkansumo.bookoffchecker
+package com.tekkansumo.bookoffsearch
 
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl

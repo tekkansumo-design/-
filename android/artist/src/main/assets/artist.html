@@ -66,7 +66,7 @@ border:1px solid #3a2c1d;border-radius:12px;padding:2px 10px;white-space:nowrap}
 .note{color:var(--dim);font-size:11px;line-height:1.7;margin-top:14px}
 </style></head><body>
 <header>
-<h1><span>BOOKOFF アーティスト検索</span><a href="#" id="toChecker">ID チェッカー ›</a></h1>
+<h1><span>BOOKOFF アーティスト検索</span></h1>
 <input type="text" id="artist" placeholder="アーティスト名（例: スピッツ）" enterkeyhint="search">
 <div class="row">
 <label class="ck"><input type="checkbox" id="gCd" checked>CD</label>
@@ -215,6 +215,5 @@ $('#bRun').addEventListener('click',start);
 $('#bStop').addEventListener('click',()=>App.cancel());
 $('#bShare').addEventListener('click',()=>{ if(S&&S.phase!=='idle') App.share(pref); });
 $('#artist').addEventListener('keydown',e=>{ if(e.key==='Enter') start(); });
-$('#toChecker').addEventListener('click',e=>{ e.preventDefault(); App.openChecker(); });
 loadInputs(); poll();
 </script></body></html>

@@ -1,4 +1,4 @@
-package com.tekkansumo.bookoffchecker
+package com.tekkansumo.bookoffsearch
 
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element

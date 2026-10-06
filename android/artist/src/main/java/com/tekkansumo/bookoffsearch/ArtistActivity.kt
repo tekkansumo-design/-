@@ -1,4 +1,4 @@
-package com.tekkansumo.bookoffchecker
+package com.tekkansumo.bookoffsearch
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -188,13 +188,6 @@ class ArtistActivity : AppCompatActivity() {
                         type = "text/plain"
                         putExtra(Intent.EXTRA_TEXT, text)
                     }, "結果を共有"))
-            }
-        }
-
-        @JavascriptInterface
-        fun openChecker() {
-            runOnUiThread {
-                startActivity(Intent(this@ArtistActivity, MainActivity::class.java))
             }
         }
     }

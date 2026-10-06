@@ -49,6 +49,8 @@ jobs:
       - name: Rename APK
         run: |
           mkdir -p out
+          cp android/artist/build/outputs/apk/debug/artist-debug.apk \
+             "out/bookoff-search-${GITHUB_RUN_NUMBER}.apk"
           cp android/app/build/outputs/apk/debug/app-debug.apk \
              "out/bookoff-checker-${GITHUB_RUN_NUMBER}.apk"
           ls -la out
@@ -63,13 +65,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: apk-${{ github.run_number }}
-          name: BOOKOFF 在庫チェッカー build ${{ github.run_number }}
+          name: BOOKOFF アプリ build ${{ github.run_number }}
           body: |
-            スマホのブラウザでこのページを開き、下の .apk をタップするとインストールできます。
+            スマホの Chrome でこのページを開き、下の .apk をタップするとインストールできます。
             「提供元不明のアプリ」の許可を求められたら許可してください。
 
-            インストールするとアイコンが 2 つできます。
-            - BOOKOFF検索: アーティスト名で CD / DVD を検索し、定価より指定額以上安い商品の在庫店舗を在庫数の多い順に表示
-            - BOOKOFF在庫: 商品ID を登録して在庫店舗をチェック
+            - bookoff-search-*.apk … BOOKOFF検索（アーティスト名で CD / DVD を検索し、定価より指定額以上安い商品の在庫店舗を在庫数の多い順に表示）
+            - bookoff-checker-*.apk … BOOKOFF在庫（商品ID を登録して在庫店舗をチェック。別アプリ）
           files: out/*.apk
           generate_release_notes: false

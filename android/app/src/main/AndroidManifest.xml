@@ -26,20 +26,6 @@
             </intent-filter>
         </activity>
 
-        <!-- アーティスト名から在庫店舗を探す画面。ID チェッカーとは別アイコンで起動する -->
-        <activity
-            android:name=".ArtistActivity"
-            android:exported="true"
-            android:label="@string/artist_name"
-            android:taskAffinity="com.tekkansumo.bookoffsearch.artist"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
-            android:launchMode="singleTask">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-
         <activity
             android:name=".ImportActivity"
             android:exported="false"

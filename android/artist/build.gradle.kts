@@ -3,22 +3,21 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// アーティスト名から CD / DVD の在庫店舗を探す単独アプリ
 android {
-    namespace = "com.tekkansumo.bookoffchecker"
+    namespace = "com.tekkansumo.bookoffsearch"
     compileSdk = 35
 
     defaultConfig {
-        // 旧ビルド（使い捨て鍵で署名）が端末に残っていても競合しないよう ID を分ける
-        applicationId = "com.tekkansumo.bookoffchecker.v2"
+        applicationId = "com.tekkansumo.bookoffsearch"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1"
+        // build 27 で同じ ID・同じ鍵のものを配ったので、上書きできるよう大きくする
+        versionCode = 3
+        versionName = "1.2"
     }
 
-    // CI は実行ごとに使い捨ての debug 鍵で署名するため、ビルドが変わるたびに
-    // 「既存のパッケージと競合」で上書きインストールできなかった。
-    // 鍵をリポジトリに固定して、毎回同じ署名にする。
+    // 毎回同じ鍵で署名し、新しいビルドを上書きインストールできるようにする
     signingConfigs {
         getByName("debug") {
             storeFile = rootProject.file("ci-debug.keystore")
@@ -44,18 +43,6 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
-
-    // android-mail と android-activation が同名のメタファイルを持つため
-    packaging {
-        resources {
-            excludes += setOf(
-                "META-INF/LICENSE*",
-                "META-INF/NOTICE*",
-                "META-INF/DEPENDENCIES",
-                "META-INF/INDEX.LIST"
-            )
-        }
-    }
 }
 
 dependencies {
@@ -63,6 +50,4 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jsoup:jsoup:1.18.3")
-    implementation("com.sun.mail:android-mail:1.6.7")
-    implementation("com.sun.mail:android-activation:1.6.7")
 }
