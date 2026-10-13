@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 bookoff_ids.json
 bookoff_mail_config.json
+bookoff_profit_config.json
 
 # Android
 android/.gradle/

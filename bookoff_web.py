@@ -13,6 +13,10 @@ Android(Termux):
   pip install flask requests
   python bookoff_web.py
   → http://127.0.0.1:5000
+
+利益リサーチ（価格差で利益が出る商品を探す）:
+  bookoff_profit.py を同じフォルダに置くと画面に「利益リサーチ」ボタンが出る
+  → http://127.0.0.1:5000/profit
 """
 
 import csv
@@ -1139,6 +1143,19 @@ const T={
       }};
   }
 };
+"""
+
+# 利益リサーチは Web 版だけの機能。ファイルがあれば組み込む
+try:
+    import bookoff_profit
+except ImportError:
+    bookoff_profit = None
+else:
+    bookoff_profit.register(app, scan_page, parse_shops)
+    WEB_JS += r"""
+(()=>{const b=document.createElement('button');b.textContent='利益リサーチ';
+b.onclick=()=>{location.href='/profit';};
+document.querySelector('#bRun').parentNode.appendChild(b);})();
 """
 
 PAGE = UI_HTML + "\n<script>\n" + WEB_JS + "\n" + UI_JS + "\n</script></body></html>\n"
