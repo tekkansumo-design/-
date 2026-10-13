@@ -64,9 +64,18 @@ border:1px solid #3a2c1d;border-radius:12px;padding:2px 10px;white-space:nowrap}
 .empty{color:var(--dim);font-size:13px;text-align:center;padding:40px 14px;line-height:1.9}
 .empty .big{font-size:15px;color:var(--ink);display:block;margin-bottom:6px}
 .note{color:var(--dim);font-size:11px;line-height:1.7;margin-top:14px}
+dialog{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;
+padding:16px;width:min(560px,94vw)}
+dialog::backdrop{background:#000a}
+dialog h2{font-size:15px;margin:0 0 6px;color:var(--hit)}
+dialog label{display:block;color:var(--dim);font-size:11px;margin:10px 0 3px}
+dialog input{width:100%;background:#120e0a;color:var(--ink);border:1px solid var(--line);
+border-radius:6px;padding:8px;font-size:13px}
+#spMsg{font-size:12px;margin-top:10px;line-height:1.6;min-height:1.6em}
+#spMsg.ok{color:var(--ok)}#spMsg.ng{color:var(--warn)}
 </style></head><body>
 <header>
-<h1><span>BOOKOFF アーティスト検索</span></h1>
+<h1><span>BOOKOFF アーティスト検索</span><a href="#" id="bSp">Amazon設定 ›</a></h1>
 <input type="text" id="artist" placeholder="アーティスト名（例: スピッツ）" enterkeyhint="search">
 <div class="row">
 <label class="ck"><input type="checkbox" id="gCd" checked>CD</label>
@@ -98,6 +107,25 @@ border:1px solid #3a2c1d;border-radius:12px;padding:2px 10px;white-space:nowrap}
 </div>
 </header>
 <main id="main"></main>
+<dialog id="dSp">
+<h2>Amazon 中古価格の取得方法</h2>
+<div class="note" style="margin-top:0">Amazon 出品者用の公式 API（SP-API）の認証情報を入れると、20 件ずつまとめて速く正確に取れます。
+空のままならアプリ内のブラウザで 1 件ずつ取ります。<br>入れた値はこのスマホの中にだけ保存されます。</div>
+<div id="spState" class="note"></div>
+<label>LWA クライアント ID（amzn1.application-oa2-client.…）</label>
+<input type="text" id="spId" autocomplete="off" autocapitalize="off" spellcheck="false">
+<label>LWA クライアントシークレット</label>
+<input type="password" id="spSecret" autocomplete="off" placeholder="">
+<label>リフレッシュトークン（Atzr|…）</label>
+<input type="password" id="spToken" autocomplete="off" placeholder="">
+<div id="spMsg"></div>
+<div class="row">
+<button class="go" id="spSave">保存</button>
+<button id="spTest">接続テスト</button>
+<button id="spClose">閉じる</button>
+</div>
+<div class="row"><button id="spClear" style="font-size:12px;padding:5px 10px">設定を消す</button></div>
+</dialog>
 <script>
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -148,6 +176,7 @@ function render(){
   if(S.noStores) ex.push(`店舗在庫なし ${S.noStores}`);
   if(S.unmatched) ex.push(`名前不一致 ${S.unmatched}`);
   if(ex.length) sum+=`<br>除外: ${ex.join('、')}`;
+  sum+=`<br>Amazon価格: ${S.amazonSource==='sp'?'SP-API（公式）':'アプリ内ブラウザ'}`;
   $('#sum').innerHTML=sum;
   // 都道府県の選択肢
   const prefs=[...new Set(S.stores.map(s=>s.pref).filter(Boolean))];
@@ -235,5 +264,31 @@ $('#bRun').addEventListener('click',start);
 $('#bStop').addEventListener('click',()=>App.cancel());
 $('#bShare').addEventListener('click',()=>{ if(S&&S.phase!=='idle') App.share(pref); });
 $('#artist').addEventListener('keydown',e=>{ if(e.key==='Enter') start(); });
-loadInputs(); poll();
+function spLoad(){
+  const c=JSON.parse(App.getSpConfig());
+  $('#spId').value=c.clientId||'';
+  $('#spSecret').value=''; $('#spToken').value='';
+  $('#spSecret').placeholder=c.hasSecret?'保存済み（変える時だけ入力）':'';
+  $('#spToken').placeholder=c.hasToken?'保存済み（変える時だけ入力）':'';
+  const on=c.clientId&&c.hasSecret&&c.hasToken;
+  $('#spState').innerHTML=on?'<b style="color:var(--ok)">● SP-API で取得します</b>':'● 未設定（アプリ内ブラウザで取得します）';
+  $('#bSp').textContent=on?'Amazon: SP-API ›':'Amazon設定 ›';
+}
+function spMsg(t,cls){ const e=$('#spMsg'); e.textContent=t; e.className=cls||''; }
+$('#bSp').addEventListener('click',e=>{ e.preventDefault(); spLoad(); spMsg(''); $('#dSp').showModal(); });
+$('#spClose').addEventListener('click',()=>$('#dSp').close());
+$('#spSave').addEventListener('click',()=>{
+  App.saveSpConfig(JSON.stringify({clientId:$('#spId').value,secret:$('#spSecret').value,token:$('#spToken').value}));
+  spLoad(); spMsg('保存しました。「接続テスト」で確かめられます','ok');
+});
+$('#spTest').addEventListener('click',()=>{
+  spMsg('テスト中…');
+  // 同期呼び出しなので、表示を更新してから呼ぶ
+  setTimeout(()=>{ const r=App.testSp(); spMsg(r, r.startsWith('接続できました')?'ok':'ng'); },50);
+});
+$('#spClear').addEventListener('click',()=>{
+  if(!confirm('SP-API の設定を消しますか？')) return;
+  App.saveSpConfig(JSON.stringify({clear:true})); spLoad(); spMsg('消しました');
+});
+loadInputs(); spLoad(); poll();
 </script></body></html>

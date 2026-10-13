@@ -26,6 +26,9 @@ class ArtistActivity : AppCompatActivity() {
 
     companion object {
         private const val PREF = "artist"
+        private const val K_SP_ID = "sp_client_id"
+        private const val K_SP_SECRET = "sp_client_secret"
+        private const val K_SP_TOKEN = "sp_refresh_token"
 
         /** 入荷店舗モーダルを開いてから描画後の HTML を返す。 */
         private const val JS_OPEN_MODAL = """
@@ -105,6 +108,16 @@ class ArtistActivity : AppCompatActivity() {
     }
 
     private fun prefs() = getSharedPreferences(PREF, Context.MODE_PRIVATE)
+
+    /** 3 つ揃っているときだけ SP-API を使う。 */
+    private fun spCreds(): Triple<String, String, String>? {
+        val pr = prefs()
+        val id = pr.getString(K_SP_ID, "") ?: ""
+        val secret = pr.getString(K_SP_SECRET, "") ?: ""
+        val token = pr.getString(K_SP_TOKEN, "") ?: ""
+        if (id.isEmpty() || secret.isEmpty() || token.isEmpty()) return null
+        return Triple(id, secret, token)
+    }
 
     /**
      * 作業スレッドから呼ばれる。WebView は UI スレッドでしか触れないので
@@ -243,6 +256,7 @@ class ArtistActivity : AppCompatActivity() {
                 strict = o.optBoolean("strict", false)
             )
             if (p.artist.isEmpty() || p.genres.isEmpty()) return false
+            ArtistSearch.spCreds = spCreds()
             val ok = ArtistSearch.start(p)
             if (ok) keepScreenOn(true)
             return ok
@@ -250,6 +264,39 @@ class ArtistActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun cancel() = ArtistSearch.cancel()
+
+        /** SP-API の設定。秘密の値は画面に返さず、入っているかどうかだけ返す。 */
+        @JavascriptInterface
+        fun getSpConfig(): String {
+            val pr = prefs()
+            return JSONObject().apply {
+                put("clientId", pr.getString(K_SP_ID, "") ?: "")
+                put("hasSecret", !pr.getString(K_SP_SECRET, "").isNullOrEmpty())
+                put("hasToken", !pr.getString(K_SP_TOKEN, "").isNullOrEmpty())
+            }.toString()
+        }
+
+        /** 空欄の秘密の値は「変更しない」。clear=true で全部消す。 */
+        @JavascriptInterface
+        fun saveSpConfig(json: String) {
+            val o = JSONObject(json)
+            val e = prefs().edit()
+            if (o.optBoolean("clear")) {
+                e.remove(K_SP_ID).remove(K_SP_SECRET).remove(K_SP_TOKEN).apply()
+                return
+            }
+            e.putString(K_SP_ID, o.optString("clientId").trim())
+            o.optString("secret").trim().takeIf { it.isNotEmpty() }?.let { e.putString(K_SP_SECRET, it) }
+            o.optString("token").trim().takeIf { it.isNotEmpty() }?.let { e.putString(K_SP_TOKEN, it) }
+            e.apply()
+        }
+
+        /** 保存済みの値で接続を試す。JavaBridge のスレッドで走るので通信してよい。 */
+        @JavascriptInterface
+        fun testSp(): String {
+            val c = spCreds() ?: return "クライアント ID・シークレット・リフレッシュトークンを全部入れて保存してください"
+            return ArtistSearch.testSp(c.first, c.second, c.third)
+        }
 
         /** version が変わっていなければ空文字（毎回大きな JSON を作らない）。 */
         @JavascriptInterface

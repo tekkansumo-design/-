@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger
  *   1. CD / DVD のジャンルで中古商品を検索し、全ページの一覧を取る
  *   2. 各商品ページを開いて入荷店舗と JAN コードを取る
  *   3. 入荷店舗がある商品だけ、JAN で Amazon を引いて中古最安値を取る
+ *      SP-API の認証情報があれば 20 件ずつまとめて公式 API で、無ければ WebView で 1 件ずつ
  *   4. 「Amazon 中古最安値 − ブックオフ中古価格」が閾値以上の商品だけ残す
  *   5. 店舗ごとに商品をまとめ、在庫商品数の多い順に並べる
  *
@@ -71,6 +72,10 @@ object ArtistSearch {
     /** Amazon の URL を WebView から取って (HTTP ステータス, 本文) を返す。画面が無いときは null。 */
     @Volatile var amazonFetch: ((String) -> Pair<Int, String>?)? = null
 
+    /** SP-API の認証情報（クライアント ID, シークレット, リフレッシュトークン）。null なら WebView で取る。 */
+    @Volatile var spCreds: Triple<String, String, String>? = null
+    private var sp: SpApi? = null
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(25, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
@@ -113,6 +118,7 @@ object ArtistSearch {
             message = "検索中…"
             unmatched = 0; doneCount = 0; amazonBlocked = 0
             rows.clear()
+            sp = spCreds?.let { (id, secret, token) -> newSpApi(id, secret, token) }
         }
         synchronized(cancelMon) { cancelled = false }
         touch()
@@ -135,6 +141,29 @@ object ArtistSearch {
                 if (left <= 0) return
                 try { cancelMon.wait(left) } catch (e: InterruptedException) { return }
             }
+        }
+    }
+
+    private fun newSpApi(id: String, secret: String, token: String) =
+        SpApi(id, secret, token, sleeper = { sleepCancellable(it) })
+
+    /**
+     * 設定画面の「接続テスト」。ログインと、カタログ・価格の権限を確かめる。
+     * 戻り値は画面にそのまま出す文言。
+     */
+    fun testSp(id: String, secret: String, token: String): String {
+        val api = SpApi(id, secret, token)
+        return try {
+            api.accessToken()
+            // 実在しなくても 200 なら「商品の出品」ロールはある
+            val asins = api.asinsByJan(listOf("4988002382299"))
+            val asin = asins.values.firstOrNull()
+            if (asin != null) api.usedLowest(listOf(asin))
+            "接続できました（ログイン・商品照合" + (if (asin != null) "・価格取得" else "") + " OK）"
+        } catch (e: SpApiException) {
+            e.message ?: "接続できませんでした"
+        } catch (e: Exception) {
+            "通信エラー: ${e.javaClass.simpleName} ${e.message ?: ""}"
         }
     }
 
@@ -226,6 +255,8 @@ object ArtistSearch {
                     val r = targets[i]
                     try {
                         fetchStores(r)
+                        // SP-API はまとめて引くので、在庫ありの商品は後でまとめて仕上げる
+                        if (sp != null && !r.stores.isNullOrEmpty()) continue
                         if (!cancelled && !r.stores.isNullOrEmpty()) fetchAmazon(r)
                     } catch (e: Exception) {
                         r.error = "internal: ${e.javaClass.simpleName}"
@@ -241,6 +272,61 @@ object ArtistSearch {
         }
         threads.forEach { it.start() }
         threads.forEach { it.join() }
+
+        val api = sp
+        if (api != null) spStage(targets.filter { !it.finished }, api)
+    }
+
+    /** 在庫ありの商品の Amazon 中古最安値を SP-API でまとめて取る。 */
+    private fun spStage(pending: List<Row>, api: SpApi) {
+        try {
+            val lookup = ArrayList<Row>()
+            for (r in pending) {
+                val jan = r.jan
+                if (jan == null) {
+                    r.amazonNote = "JANコードが見つからず Amazon を検索できません"
+                    continue
+                }
+                val hit = synchronized(amazonCache) { amazonCache[jan] }
+                if (hit != null) {
+                    r.asin = hit.first; r.amazon = hit.second; r.amazonNote = hit.third
+                } else lookup.add(r)
+            }
+            if (lookup.isEmpty() || cancelled) return
+
+            fun check() { if (cancelled) throw SpApiException("中止しました") }
+            val jans = lookup.mapNotNull { it.jan }.distinct()
+            val asins = api.asinsByJan(jans) { d, t ->
+                check(); setMsg("Amazon（SP-API）で商品を照合中 $d / $t")
+            }
+            check()
+            val prices = api.usedLowest(asins.values.distinct()) { d, t ->
+                check(); setMsg("Amazon（SP-API）で中古最安値を取得中 $d / ${asins.size}（10秒ごとに20件）")
+            }
+            for (r in lookup) {
+                val jan = r.jan ?: continue
+                val asin = asins[jan]
+                r.asin = asin
+                when {
+                    asin == null -> r.amazonNote = NOTE_NOT_FOUND
+                    !prices.containsKey(asin) -> r.amazonNote = "Amazon の価格を取得できませんでした"
+                    else -> {
+                        r.amazon = prices[asin]
+                        if (r.amazon == null) r.amazonNote = NOTE_NO_USED
+                        synchronized(amazonCache) { amazonCache[jan] = Triple(asin, r.amazon, r.amazonNote) }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            val msg = if (e is SpApiException) e.message ?: "SP-API エラー"
+            else "SP-API 通信エラー: ${e.javaClass.simpleName}"
+            for (r in pending) if (r.amazon == null && r.amazonNote == null) r.amazonNote = msg
+            if (!cancelled) setMsg(msg)
+        } finally {
+            for (r in pending) r.finished = true
+            synchronized(lock) { doneCount += pending.size }
+            touch()
+        }
     }
 
     private fun fetchStores(r: Row) {
@@ -463,6 +549,7 @@ object ArtistSearch {
             put("version", version.get())
             put("running", running)
             put("phase", phase)
+            put("amazonSource", if (sp != null) "sp" else "web")
             put("message", message)
             put("artist", p?.artist ?: "")
             put("minDiff", min)
