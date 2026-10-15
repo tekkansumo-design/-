@@ -1,0 +1,13 @@
+{
+  "name": "背景カット",
+  "short_name": "背景カット",
+  "description": "写真の背景を自動で消して、好きな背景に差し替える",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#14161a",
+  "theme_color": "#14161a",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

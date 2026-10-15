@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>背景カット</title>
+<meta name="description" content="写真の背景を自動で消して、好きな背景に差し替えるアプリ。処理は端末内で完結します。">
+<meta name="theme-color" content="#14161a">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="bar" id="homeBar">
+    <h1><img src="icon.svg" alt="" width="22" height="22"> 背景カット</h1>
+    <span class="spacer"></span>
+    <button class="icon-btn" id="btnSettings" title="設定" aria-label="設定">
+      <svg viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm7.43-2.53c.04-.32.07-.64.07-.97s-.03-.66-.07-1l2.11-1.63a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1a7.3 7.3 0 0 0-1.69-.98l-.38-2.65A.49.49 0 0 0 14 2h-4a.49.49 0 0 0-.49.42l-.38 2.65c-.61.25-1.17.58-1.69.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46a.49.49 0 0 0 .12.64L4.57 11c-.04.34-.07.67-.07 1s.03.65.07.97l-2.11 1.66a.49.49 0 0 0-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.58 1.69-.98l2.49 1.01c.22.08.49 0 .61-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.66Z"/></svg>
+    </button>
+  </div>
+  <div class="bar" id="editBar" hidden>
+    <button class="icon-btn" id="btnBack" title="一覧へ戻る" aria-label="一覧へ戻る">
+      <svg viewBox="0 0 24 24"><path d="M15.4 7.4 14 6l-6 6 6 6 1.4-1.4L10.8 12z"/></svg>
+    </button>
+    <span class="edit-title" id="editTitle"></span>
+    <span class="spacer"></span>
+    <button class="icon-btn" id="btnUndo" title="元に戻す (Ctrl+Z)" aria-label="元に戻す">
+      <svg viewBox="0 0 24 24"><path d="M12.5 8c-2.65 0-5.05 1-6.9 2.6L2 7v9h9l-3.62-3.62A7.95 7.95 0 0 1 20.1 16l2.37-.78A10.5 10.5 0 0 0 12.5 8Z"/></svg>
+    </button>
+    <button class="icon-btn" id="btnRedo" title="やり直す (Ctrl+Shift+Z)" aria-label="やり直す">
+      <svg viewBox="0 0 24 24"><path d="M18.4 10.6A10.46 10.46 0 0 0 1.53 15.22L3.9 16a7.95 7.95 0 0 1 12.72-3.62L13 16h9V7l-3.6 3.6Z"/></svg>
+    </button>
+    <button class="icon-btn" id="btnCompare" title="押している間だけ元の写真を表示" aria-label="元の写真と比較">
+      <svg viewBox="0 0 24 24"><path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v2h2V1h-2v2Zm0 15H5l5-6v6Zm9-15h-5v2h5v13l-5-6v9h5a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z"/></svg>
+    </button>
+    <button class="btn primary" id="btnExport">保存</button>
+  </div>
+</header>
+
+<main>
+  <!-- 一覧（取り込みと全自動処理） -->
+  <section id="home" class="home">
+    <label class="drop" id="drop">
+      <input type="file" id="fileInput" accept="image/*" multiple hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/></svg>
+      <strong>写真を選ぶ</strong>
+      <span>複数まとめて選べます。ここにドロップ・貼り付けもできます</span>
+    </label>
+
+    <div class="auto card">
+      <div class="auto-head">
+        <strong>自動で仕上げる設定</strong>
+        <span class="muted">取り込んだ写真すべてにこの設定が自動でかかります</span>
+      </div>
+      <div class="field">
+        <span class="label">背景</span>
+        <div class="swatches" id="tplSwatches"></div>
+      </div>
+      <div class="field-row">
+        <label class="field">
+          <span class="label">形</span>
+          <select id="tplAspect"></select>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="tplShadow">
+          <span>影をつける</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="model-status" id="modelStatus" hidden></div>
+
+    <div class="grid-head" id="gridHead" hidden>
+      <strong id="gridCount"></strong>
+      <span class="spacer"></span>
+      <button class="btn" id="btnExportAll">すべて保存 (ZIP)</button>
+      <button class="btn ghost danger" id="btnClearAll">全部削除</button>
+    </div>
+    <div class="grid" id="grid"></div>
+    <p class="privacy muted">写真はこの端末の中だけで処理されます。どこにも送信されません。</p>
+  </section>
+
+  <!-- 編集画面 -->
+  <section id="editor" class="editor" hidden>
+    <div class="stage" id="stage">
+      <canvas id="view"></canvas>
+      <div class="stage-hint" id="stageHint"></div>
+      <div class="zoom-ctl">
+        <button class="icon-btn small" id="btnFit" title="全体を表示" aria-label="全体を表示">
+          <svg viewBox="0 0 24 24"><path d="M3 5v4h2V5h4V3H5a2 2 0 0 0-2 2Zm2 10H3v4a2 2 0 0 0 2 2h4v-2H5v-4Zm14 4h-4v2h4a2 2 0 0 0 2-2v-4h-2v4Zm0-16h-4v2h4v4h2V5a2 2 0 0 0-2-2Z"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="tools">
+      <nav class="tabs" role="tablist">
+        <button role="tab" data-tab="bg" class="active">背景</button>
+        <button role="tab" data-tab="fix">切り抜き修整</button>
+        <button role="tab" data-tab="edge">境界</button>
+        <button role="tab" data-tab="layout">配置</button>
+      </nav>
+
+      <div class="panel" data-panel="bg">
+        <div class="swatches" id="bgSwatches"></div>
+        <label class="field" id="blurField" hidden>
+          <span class="label">ぼかしの強さ</span>
+          <input type="range" id="optBlur" min="6" max="80" value="24">
+        </label>
+        <div class="field-row">
+          <label class="toggle"><input type="checkbox" id="optShadow"><span>影をつける</span></label>
+          <span class="spacer"></span>
+          <button class="btn ghost" id="btnApplyBgAll">この背景を全部に適用</button>
+        </div>
+      </div>
+
+      <div class="panel" data-panel="fix" hidden>
+        <div class="seg" role="radiogroup">
+          <button data-mode="erase" class="active">
+            <svg viewBox="0 0 24 24"><path d="m16.24 3.56 4.95 4.94a2 2 0 0 1 0 2.83L12 20.53A5 5 0 0 1 8.46 22H3v-2h3.59L2.81 16.2a2 2 0 0 1 0-2.82L13.4 3.56a2 2 0 0 1 2.83 0ZM4.22 14.8l5.66 5.66 3.53-3.54-5.65-5.65-3.54 3.53Z"/></svg>
+            消す
+          </button>
+          <button data-mode="restore">
+            <svg viewBox="0 0 24 24"><path d="M7 14a3 3 0 0 0-3 3c0 1.31-1.16 2-2 2 .92 1.22 2.49 2 4 2a4 4 0 0 0 4-4 3 3 0 0 0-3-3Zm13.71-9.37-1.34-1.34a1 1 0 0 0-1.41 0L9 12.25 11.75 15l8.96-8.96a1 1 0 0 0 0-1.41Z"/></svg>
+            戻す
+          </button>
+          <button data-mode="pan">
+            <svg viewBox="0 0 24 24"><path d="M10 9h4V6h3l-5-5-5 5h3v3Zm-1 1H6V7l-5 5 5 5v-3h3v-4Zm14 2-5-5v3h-3v4h3v3l5-5Zm-9 3h-4v3H7l5 5 5-5h-3v-3Z"/></svg>
+            移動
+          </button>
+        </div>
+        <label class="field">
+          <span class="label">ブラシの大きさ <output id="brushSizeOut"></output></span>
+          <input type="range" id="brushSize" min="6" max="160" value="40">
+        </label>
+        <label class="field">
+          <span class="label">ブラシの硬さ <output id="brushHardOut"></output></span>
+          <input type="range" id="brushHard" min="0" max="100" value="60">
+        </label>
+        <div class="field-row">
+          <label class="toggle"><input type="checkbox" id="optGhost" checked><span>消えた部分を薄く表示</span></label>
+          <span class="spacer"></span>
+          <button class="btn ghost" id="btnResetMask">自動の結果に戻す</button>
+        </div>
+      </div>
+
+      <div class="panel" data-panel="edge" hidden>
+        <label class="field">
+          <span class="label">境界を広げる / 狭める <output id="edgeShiftOut"></output></span>
+          <input type="range" id="edgeShift" min="-12" max="12" value="0">
+        </label>
+        <label class="field">
+          <span class="label">境界のぼかし <output id="edgeFeatherOut"></output></span>
+          <input type="range" id="edgeFeather" min="0" max="20" value="0">
+        </label>
+        <p class="muted small">縁に元の背景が残るときは「狭める」、被写体が削れているときは「広げる」へ。</p>
+      </div>
+
+      <div class="panel" data-panel="layout" hidden>
+        <div class="chips" id="aspectChips"></div>
+        <label class="field">
+          <span class="label">余白 <output id="marginOut"></output></span>
+          <input type="range" id="optMargin" min="0" max="40" value="8">
+        </label>
+        <div class="field-row">
+          <span class="muted small">写真をドラッグで移動、ピンチで拡大縮小</span>
+          <span class="spacer"></span>
+          <button class="btn ghost" id="btnRecenter">中央に配置し直す</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<input type="file" id="bgFileInput" accept="image/*" hidden>
+<input type="file" id="modelFileInput" accept=".onnx" hidden>
+
+<dialog id="exportDlg" class="sheet">
+  <form method="dialog">
+    <h2>保存</h2>
+    <div class="seg" id="fmtSeg">
+      <button type="button" data-fmt="png" class="active">PNG（透明を保持）</button>
+      <button type="button" data-fmt="jpeg">JPEG（軽い）</button>
+    </div>
+    <p class="muted small" id="exportInfo"></p>
+    <div class="actions">
+      <button type="button" class="btn" id="btnShare" hidden>共有…</button>
+      <button type="button" class="btn primary" id="btnDownload">端末に保存</button>
+      <button class="btn ghost" value="cancel">閉じる</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="settingsDlg" class="sheet">
+  <form method="dialog">
+    <h2>設定</h2>
+    <label class="field">
+      <span class="label">背景削除モデル</span>
+      <select id="setModel"></select>
+    </label>
+    <div id="customModel" hidden>
+      <label class="field"><span class="label">モデルの URL（.onnx）</span><input type="url" id="setModelUrl" placeholder="https://…/model.onnx"></label>
+      <div class="field-row">
+        <label class="field"><span class="label">入力サイズ</span><input type="number" id="setModelSize" min="64" max="2048" step="32" value="1024"></label>
+        <label class="field"><span class="label">前処理</span>
+          <select id="setModelNorm">
+            <option value="rmbg">RMBG（平均0.5）</option>
+            <option value="isnet">ISNet（ImageNet平均）</option>
+            <option value="imagenet">U²-Net など（ImageNet）</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div id="fileModel" hidden>
+      <div class="field-row">
+        <span class="muted small" id="fileModelName">未選択</span>
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="btnPickModel">.onnx を選ぶ</button>
+      </div>
+    </div>
+    <label class="field">
+      <span class="label">処理する解像度（長辺）</span>
+      <select id="setMaxSide">
+        <option value="1536">1536px（軽い）</option>
+        <option value="2048">2048px（標準）</option>
+        <option value="3072">3072px</option>
+        <option value="4096">4096px（重い）</option>
+      </select>
+    </label>
+    <label class="toggle"><input type="checkbox" id="setGuided"><span>髪の毛など細かい境界を精密化する</span></label>
+    <p class="muted small" id="settingsInfo"></p>
+    <div class="actions">
+      <button type="button" class="btn ghost danger" id="btnClearCache">モデルのキャッシュを削除</button>
+      <span class="spacer"></span>
+      <button class="btn primary" value="ok">閉じる</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

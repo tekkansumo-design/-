@@ -1,0 +1,38 @@
+name: 背景カット (GitHub Pages)
+
+on:
+  push:
+    paths:
+      - 'bgcut/**'
+      - '.github/workflows/bgcut-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: bgcut-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check JavaScript syntax
+        run: for f in bgcut/*.js; do node --check "$f"; done
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: bgcut
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
