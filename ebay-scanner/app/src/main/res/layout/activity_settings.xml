@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0F1720">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView style="@style/SetHead" android:text="eBay API の鍵" />
+        <TextView
+            style="@style/SetNote"
+            android:text="developer.ebay.com で無料登録し、Production の App ID (Client ID) と Cert ID (Client Secret) を入れてください。" />
+        <TextView style="@style/SetLabel" android:text="App ID (Client ID)" />
+        <EditText android:id="@+id/clientId" style="@style/SetEdit" android:inputType="text" />
+        <TextView style="@style/SetLabel" android:text="Cert ID (Client Secret)" />
+        <EditText android:id="@+id/clientSecret" style="@style/SetEdit" android:inputType="textPassword" />
+
+        <TextView style="@style/SetHead" android:text="利益の計算" />
+        <TextView style="@style/SetLabel" android:text="この金額以上の利益で知らせる（円）" />
+        <EditText android:id="@+id/threshold" style="@style/SetEdit" android:inputType="number" />
+        <TextView style="@style/SetLabel" android:text="eBay 手数料の合計（%）" />
+        <TextView
+            style="@style/SetNote"
+            android:text="落札手数料・海外手数料・為替/入金コストなどの合計。目安 15〜20%。" />
+        <EditText android:id="@+id/fee" style="@style/SetEdit" android:inputType="numberDecimal" />
+        <TextView style="@style/SetLabel" android:text="送料 + 梱包材の見込み（円）" />
+        <EditText android:id="@+id/shipping" style="@style/SetEdit" android:inputType="number" />
+
+        <TextView style="@style/SetHead" android:text="為替" />
+        <Switch android:id="@+id/autoFx" style="@style/SetSwitch" android:text="ドル円レートを自動で取得する" />
+        <TextView style="@style/SetLabel" android:text="手動のレート（1ドル = 円）" />
+        <EditText android:id="@+id/manualFx" style="@style/SetEdit" android:inputType="numberDecimal" />
+        <TextView android:id="@+id/fxNow" style="@style/SetNote" />
+
+        <TextView style="@style/SetHead" android:text="検索" />
+        <Switch android:id="@+id/imageSearch" style="@style/SetSwitch" android:text="バーコードも型番も無いとき、写真で検索する" />
+        <Switch android:id="@+id/preferJp" style="@style/SetSwitch" android:text="日本から発送している出品の相場を優先する" />
+        <Switch android:id="@+id/sound" style="@style/SetSwitch" android:text="アラートで音を鳴らす" />
+
+        <Button
+            android:id="@+id/save"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:backgroundTint="#22C55E"
+            android:text="保存"
+            android:textColor="#FFFFFF" />
+    </LinearLayout>
+</ScrollView>

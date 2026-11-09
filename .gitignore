@@ -10,3 +10,7 @@ android/app/build/
 android/local.properties
 *.iml
 .idea/
+ebay-scanner/.gradle/
+ebay-scanner/build/
+ebay-scanner/app/build/
+ebay-scanner/local.properties
