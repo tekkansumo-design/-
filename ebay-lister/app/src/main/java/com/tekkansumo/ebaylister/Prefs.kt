@@ -22,9 +22,9 @@ class Prefs(context: Context) {
     fun get(key: String): String = sp.getString(key, "") ?: ""
 
     fun toJson(): JSONObject = JSONObject().apply {
-        keys.forEach { put(it, get(it)) }
+        keys.forEach { put(it, this@Prefs.get(it)) }
         put("sandbox", sandbox)
-        if (get("marketplace").isBlank()) put("marketplace", "EBAY_US")
+        if (this@Prefs.get("marketplace").isBlank()) put("marketplace", "EBAY_US")
     }
 
     fun save(json: JSONObject) {
