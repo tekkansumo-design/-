@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 値札のかたち -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,34 L60,34 L76,50 L76,58 L60,74 L36,74 Z" />
+    <path
+        android:fillColor="#0B63CE"
+        android:pathData="M64,52 m-4,0 a4,4 0,1 1,8 0 a4,4 0,1 1,-8 0" />
+    <path
+        android:fillColor="#0B63CE"
+        android:pathData="M41,44 L55,44 L55,48 L41,48 Z M41,52 L55,52 L55,56 L41,56 Z M41,60 L51,60 L51,64 L41,64 Z" />
+</vector>

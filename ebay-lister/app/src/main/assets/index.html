@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>eBay 出品アシスタント</title>
+<style>
+:root {
+  --bg: #f4f5f7; --card: #fff; --ink: #1b1f24; --sub: #5d6670; --line: #dde1e6;
+  --accent: #0b63ce; --accent-ink: #fff; --warn: #b4232c; --ok: #1f7a3a; --chip: #eef2f7;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #121417; --card: #1c1f24; --ink: #e8eaed; --sub: #9aa3ad; --line: #2e333a;
+          --accent: #5aa2ff; --accent-ink: #0b1220; --warn: #ff6b72; --ok: #5bd17f; --chip: #262b32; }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.5 system-ui, -apple-system, "Noto Sans JP", sans-serif; }
+header { position: sticky; top: 0; z-index: 5; background: var(--card); border-bottom: 1px solid var(--line);
+  display: flex; }
+header button { flex: 1; border: 0; background: none; color: var(--sub); padding: 14px 0; font-size: 15px;
+  border-bottom: 3px solid transparent; }
+header button.on { color: var(--accent); border-color: var(--accent); font-weight: 600; }
+main { padding: 12px 12px 120px; max-width: 720px; margin: 0 auto; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+.card h2 { font-size: 16px; margin: 0 0 10px; }
+label { display: block; font-size: 13px; color: var(--sub); margin: 10px 0 4px; }
+input, select, textarea { width: 100%; font: inherit; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+textarea { min-height: 80px; resize: vertical; }
+.row { display: flex; gap: 8px; align-items: center; }
+.row > * { flex: 1; }
+.row > .shrink { flex: 0 0 auto; }
+button.btn { font: inherit; border: 1px solid var(--line); background: var(--chip); color: var(--ink);
+  border-radius: 8px; padding: 10px 12px; white-space: nowrap; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600;
+  width: 100%; padding: 14px; font-size: 16px; margin-top: 12px; }
+button:disabled { opacity: .5; }
+.photos { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 10px; }
+.photos div { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: var(--chip); }
+.photos img { width: 100%; height: 100%; object-fit: cover; }
+.photos b { position: absolute; top: 2px; right: 2px; width: 24px; height: 24px; border-radius: 12px;
+  background: rgba(0,0,0,.6); color: #fff; text-align: center; line-height: 24px; font-size: 14px; }
+.hint { font-size: 12px; color: var(--sub); margin-top: 4px; }
+.log { font-size: 13px; color: var(--sub); max-height: 160px; overflow: auto; }
+.log div::before { content: "・"; }
+.err { color: var(--warn); font-size: 14px; white-space: pre-wrap; }
+.okmsg { color: var(--ok); font-weight: 600; }
+.summary { background: var(--chip); border-radius: 8px; padding: 10px; font-size: 14px; white-space: pre-wrap; }
+.sources a { display: block; font-size: 12px; color: var(--accent); word-break: break-all; }
+.asp { border-top: 1px solid var(--line); padding: 6px 0; }
+.asp:first-child { border-top: 0; }
+.asp label { margin-top: 4px; }
+.badge { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 4px; margin-left: 4px; vertical-align: 1px; }
+.req { background: var(--warn); color: #fff; }
+.rec { background: var(--chip); color: var(--sub); border: 1px solid var(--line); }
+.missing input, .missing select { border-color: var(--warn); }
+details summary { color: var(--accent); padding: 8px 0; }
+.count { float: right; font-size: 12px; color: var(--sub); }
+.count.over { color: var(--warn); font-weight: 600; }
+.catlist button { display: block; width: 100%; text-align: left; margin-top: 6px; white-space: normal; }
+.switch { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.switch input { width: auto; }
+.status { font-weight: 600; }
+.hidden { display: none !important; }
+.steps { padding-left: 20px; font-size: 13px; color: var(--sub); }
+.steps li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <button id="tabList" class="on" onclick="tab('list')">出品</button>
+  <button id="tabSettings" onclick="tab('settings')">設定</button>
+</header>
+
+<main>
+<!-- ====================== 出品タブ ====================== -->
+<section id="pageList">
+  <div class="card">
+    <h2>1. 商品</h2>
+    <label for="jan">JAN コード</label>
+    <div class="row">
+      <input id="jan" inputmode="numeric" placeholder="4901234567890">
+      <button class="btn shrink" onclick="App.scan()">バーコード読取</button>
+    </div>
+
+    <label>写真（1 枚目がメイン画像。最大 12 枚）</label>
+    <div class="row">
+      <button class="btn" onclick="App.takePhoto()">撮影する</button>
+      <button class="btn" onclick="App.pickPhotos()">ギャラリーから</button>
+    </div>
+    <div id="photos" class="photos"></div>
+
+    <label for="condition">状態</label>
+    <select id="condition"></select>
+
+    <label for="notes">メモ（任意・日本語で OK）</label>
+    <textarea id="notes" placeholder="例: 箱に小さな傷あり。説明書・付属品はすべて揃っています。"></textarea>
+
+    <button id="analyzeBtn" class="primary" onclick="analyze()">AI で下書きを作る</button>
+    <div class="hint">ウェブで商品情報を調べ、eBay のカテゴリと Item Specifics を自動で埋めます（1〜3 分ほど）。</div>
+  </div>
+
+  <div id="logCard" class="card hidden">
+    <div id="log" class="log"></div>
+    <div id="err" class="err"></div>
+  </div>
+
+  <div id="draftCard" class="hidden">
+    <div class="card">
+      <h2>2. 調べた結果</h2>
+      <div id="productName" class="status"></div>
+      <div id="summary" class="summary"></div>
+      <details><summary>参照した情報源</summary><div id="sources" class="sources"></div></details>
+    </div>
+
+    <div class="card">
+      <h2>3. 出品内容</h2>
+      <label for="title">タイトル（英語）<span id="titleCount" class="count"></span></label>
+      <input id="title" maxlength="120" oninput="countTitle()">
+
+      <label>カテゴリ</label>
+      <div id="catName" class="status"></div>
+      <div class="row" style="margin-top:6px">
+        <input id="catQuery" placeholder="別のカテゴリを探す（英語）">
+        <button class="btn shrink" onclick="findCategory()">検索</button>
+      </div>
+      <div id="catList" class="catlist"></div>
+
+      <div class="row">
+        <div><label for="brand">ブランド</label><input id="brand"></div>
+        <div><label for="mpn">型番 (MPN)</label><input id="mpn"></div>
+      </div>
+      <label for="gtin">GTIN（JAN/EAN/UPC）</label>
+      <input id="gtin" inputmode="numeric">
+    </div>
+
+    <div class="card">
+      <h2>Item Specifics</h2>
+      <div class="hint">赤い「必須」は入力しないと出品できません。複数の値は「;」で区切ります。</div>
+      <div id="aspects"></div>
+      <details id="moreBox"><summary id="moreLabel">その他の項目</summary><div id="aspectsMore"></div></details>
+    </div>
+
+    <div class="card">
+      <h2>状態・説明</h2>
+      <label for="condition2">状態</label>
+      <select id="condition2"></select>
+      <label for="condDesc">状態の説明（英語・中古品のみ）</label>
+      <textarea id="condDesc"></textarea>
+      <label for="desc">商品説明（HTML）</label>
+      <textarea id="desc" style="min-height:180px"></textarea>
+    </div>
+
+    <div class="card">
+      <h2>価格</h2>
+      <div class="row">
+        <div><label for="price">価格 (<span id="cur">USD</span>)</label><input id="price" inputmode="decimal"></div>
+        <div><label for="qty">数量</label><input id="qty" inputmode="numeric" value="1"></div>
+      </div>
+      <div id="priceNote" class="hint"></div>
+      <button id="publishBtn" class="primary" onclick="publish()">eBay に出品する</button>
+      <div id="pubErr" class="err"></div>
+      <div id="pubOk"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== 設定タブ ====================== -->
+<section id="pageSettings" class="hidden">
+  <div class="card">
+    <h2>Claude API</h2>
+    <label for="claudeKey">API キー</label>
+    <input id="claudeKey" type="password" placeholder="sk-ant-...">
+    <div class="hint">console.anthropic.com の「API Keys」で発行します。商品の調査と下書き作成に使います。</div>
+  </div>
+
+  <div class="card">
+    <h2>eBay アプリ設定</h2>
+    <ol class="steps">
+      <li>developer.ebay.com でアカウントを作り、Application Keys で Production（またはSandbox）のキーを発行</li>
+      <li>「User Tokens」→「Get a Token from eBay via Your Application」で RuName を作成（accept URL は既定のままで可）</li>
+      <li>下に Client ID（App ID）・Client Secret（Cert ID）・RuName を入れて保存</li>
+    </ol>
+    <div class="switch"><input type="checkbox" id="sandbox"><label for="sandbox" style="margin:0">サンドボックス（テスト環境）を使う</label></div>
+    <label for="marketplace">出品先</label>
+    <select id="marketplace"></select>
+    <label for="ebayClientId">Client ID (App ID)</label>
+    <input id="ebayClientId" autocapitalize="off">
+    <label for="ebayClientSecret">Client Secret (Cert ID)</label>
+    <input id="ebayClientSecret" type="password" autocapitalize="off">
+    <label for="ebayRuName">RuName</label>
+    <input id="ebayRuName" autocapitalize="off">
+    <button class="primary" onclick="saveSettings(true)">保存</button>
+  </div>
+
+  <div class="card">
+    <h2>eBay アカウント</h2>
+    <div>状態: <span id="loginStatus" class="status"></span></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" onclick="saveSettings(false); App.login()">eBay にログイン</button>
+      <button class="btn" onclick="App.logout()">ログアウト</button>
+    </div>
+    <div id="loginErr" class="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>出品ポリシー・発送元</h2>
+    <div class="hint">eBay の「Business Policies」で作った配送・支払い・返品ポリシーを選びます。</div>
+    <button class="btn" style="margin-top:8px" onclick="App.loadAccount()">eBay から読み込む</button>
+    <label for="fulfillmentPolicyId">配送ポリシー</label>
+    <select id="fulfillmentPolicyId"></select>
+    <label for="paymentPolicyId">支払いポリシー</label>
+    <select id="paymentPolicyId"></select>
+    <label for="returnPolicyId">返品ポリシー</label>
+    <select id="returnPolicyId"></select>
+    <label for="locationKey">発送元ロケーション</label>
+    <select id="locationKey"></select>
+    <details>
+      <summary>発送元を新しく登録する</summary>
+      <div class="row">
+        <div><label for="locPostal">郵便番号</label><input id="locPostal" placeholder="100-0001"></div>
+        <div><label for="locState">都道府県（ローマ字）</label><input id="locState" placeholder="Tokyo"></div>
+      </div>
+      <label for="locCity">市区町村（ローマ字）</label>
+      <input id="locCity" placeholder="Chiyoda-ku">
+      <button class="btn" style="margin-top:8px" onclick="createLocation()">登録</button>
+    </details>
+    <button class="primary" onclick="saveSettings(true)">保存</button>
+    <div id="accountErr" class="err"></div>
+  </div>
+</section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const SETTING_KEYS = ["claudeKey", "ebayClientId", "ebayClientSecret", "ebayRuName", "marketplace",
+  "fulfillmentPolicyId", "paymentPolicyId", "returnPolicyId", "locationKey"];
+let state = JSON.parse(App.state());
+let draft = null;       // Claude が作った下書き
+let aspectDefs = [];    // 現在のカテゴリのアスペクト定義
+let busy = false;
+
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+function tab(name) {
+  $("pageList").classList.toggle("hidden", name !== "list");
+  $("pageSettings").classList.toggle("hidden", name !== "settings");
+  $("tabList").classList.toggle("on", name === "list");
+  $("tabSettings").classList.toggle("on", name === "settings");
+  window.scrollTo(0, 0);
+}
+
+function fillOptions(sel, entries, value) {
+  sel.innerHTML = entries.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("");
+  if (value != null) sel.value = value;
+}
+
+// ---------------------------------------------------------------- 設定
+function applySettings(s) {
+  for (const k of SETTING_KEYS) {
+    const el = $(k);
+    if (!el) continue;
+    if (el.tagName === "SELECT" && ![...el.options].some(o => o.value === s[k]) && s[k]) {
+      el.insertAdjacentHTML("beforeend", `<option value="${esc(s[k])}">${esc(s[k])}</option>`);
+    }
+    el.value = s[k] ?? "";
+  }
+  $("sandbox").checked = !!s.sandbox;
+}
+
+function readSettings() {
+  const s = {};
+  for (const k of SETTING_KEYS) if ($(k)) s[k] = $(k).value;
+  s.sandbox = $("sandbox").checked;
+  return s;
+}
+
+function saveSettings(notify) {
+  App.saveSettings(JSON.stringify(readSettings()));
+  state = JSON.parse(App.state());
+  $("cur").textContent = state.currency;
+  if (notify) App.toast("保存しました");
+}
+
+function setLogin(loggedIn) {
+  $("loginStatus").textContent = loggedIn ? "ログイン済み" : "未ログイン";
+  $("loginStatus").style.color = loggedIn ? "var(--ok)" : "var(--warn)";
+}
+
+function createLocation() {
+  if (!$("locPostal").value.trim()) { $("accountErr").textContent = "郵便番号を入れてください。"; return; }
+  $("accountErr").textContent = "";
+  App.createLocation(JSON.stringify({ postalCode: $("locPostal").value.trim(), city: $("locCity").value.trim(), state: $("locState").value.trim() }));
+}
+
+// ---------------------------------------------------------------- 下書き作成
+function analyze() {
+  if (busy) return;
+  busy = true;
+  $("analyzeBtn").disabled = true;
+  $("analyzeBtn").textContent = "調べています…";
+  $("logCard").classList.remove("hidden");
+  $("log").innerHTML = "";
+  $("err").textContent = "";
+  App.analyze(JSON.stringify({ jan: $("jan").value.trim(), notes: $("notes").value, condition: $("condition").value }));
+}
+
+function doneAnalyze() {
+  busy = false;
+  $("analyzeBtn").disabled = false;
+  $("analyzeBtn").textContent = "AI で下書きを作る";
+}
+
+function log(text) {
+  $("log").insertAdjacentHTML("beforeend", `<div>${esc(text)}</div>`);
+  $("log").scrollTop = $("log").scrollHeight;
+}
+
+function showDraft(d) {
+  draft = d;
+  $("draftCard").classList.remove("hidden");
+  $("productName").textContent = d.product_name_ja || "";
+  $("summary").textContent = d.summary_ja || "";
+  $("sources").innerHTML = (d.sources || []).map(u => `<a href="#" data-u="${esc(u)}" onclick="App.openUrl(this.dataset.u);return false">${esc(u)}</a>`).join("");
+  $("title").value = d.title || "";
+  countTitle();
+  $("catName").textContent = `${d.category_name || ""}（${d.category_id || "-"}）`;
+  $("brand").value = d.brand || "";
+  $("mpn").value = d.mpn || "";
+  $("gtin").value = d.gtin || $("jan").value;
+  $("condition2").value = $("condition").value;
+  $("condDesc").value = d.condition_description || "";
+  $("desc").value = d.description_html || "";
+  $("price").value = d.suggested_price ? Number(d.suggested_price).toFixed(2) : "";
+  $("priceNote").textContent = d.price_note_ja || "";
+  $("pubErr").textContent = ""; $("pubOk").innerHTML = "";
+  const values = {};
+  (d.aspects || []).forEach(a => values[a.name] = a.values || []);
+  renderAspects(d.aspect_defs || [], values);
+  $("draftCard").scrollIntoView({ behavior: "smooth" });
+}
+
+function countTitle() {
+  const n = $("title").value.length;
+  $("titleCount").textContent = `${n}/80`;
+  $("titleCount").classList.toggle("over", n > 80);
+}
+
+// ---------------------------------------------------------------- Item Specifics
+function currentAspectValues() {
+  const out = {};
+  document.querySelectorAll("[data-aspect]").forEach(el => {
+    const v = el.value.split(";").map(s => s.trim()).filter(Boolean);
+    if (v.length) out[el.dataset.aspect] = v;
+  });
+  return out;
+}
+
+function renderAspects(defs, values) {
+  aspectDefs = defs;
+  const known = new Set(defs.map(d => d.name));
+  // 定義に無いがClaudeが入れた値も残す（自由入力の追加項目として）
+  const extras = Object.keys(values).filter(k => !known.has(k)).map(k => ({ name: k, required: false, mode: "FREE_TEXT", cardinality: "MULTI", usage: "OPTIONAL", values: [] }));
+  const all = defs.concat(extras);
+  const main = [], more = [];
+  all.forEach((d, i) => {
+    const has = (values[d.name] || []).length > 0;
+    (d.required || d.usage === "RECOMMENDED" || has ? main : more).push(aspectRow(d, values[d.name] || [], i));
+  });
+  $("aspects").innerHTML = main.join("") || '<div class="hint">項目がありません</div>';
+  $("aspectsMore").innerHTML = more.join("");
+  $("moreLabel").textContent = `その他の項目（${more.length}）`;
+  $("moreBox").classList.toggle("hidden", more.length === 0);
+  markMissing();
+}
+
+function aspectRow(d, vals, i) {
+  const id = "asp" + i;
+  const badge = d.required ? '<span class="badge req">必須</span>' : d.usage === "RECOMMENDED" ? '<span class="badge rec">推奨</span>' : "";
+  const multi = d.cardinality === "MULTI";
+  let field;
+  if (d.mode === "SELECTION_ONLY" && !multi && d.values.length) {
+    const opts = [["", "（選択）"]].concat(d.values.map(v => [v, v]));
+    if (vals[0] && !d.values.includes(vals[0])) opts.push([vals[0], vals[0] + "（候補外）"]);
+    field = `<select id="${id}" data-aspect="${esc(d.name)}" onchange="markMissing()">` +
+      opts.map(([v, l]) => `<option value="${esc(v)}" ${v === (vals[0] || "") ? "selected" : ""}>${esc(l)}</option>`).join("") + "</select>";
+  } else {
+    const list = d.values.length ? `<datalist id="${id}l">${d.values.slice(0, 300).map(v => `<option value="${esc(v)}">`).join("")}</datalist>` : "";
+    field = `<input id="${id}" data-aspect="${esc(d.name)}" value="${esc(vals.join("; "))}" ${list ? `list="${id}l"` : ""} oninput="markMissing()" placeholder="${multi ? "複数可（; 区切り）" : ""}">${list}`;
+  }
+  return `<div class="asp" data-row="${esc(d.name)}" data-req="${d.required ? 1 : 0}"><label for="${id}">${esc(d.name)}${badge}</label>${field}</div>`;
+}
+
+function markMissing() {
+  document.querySelectorAll(".asp").forEach(row => {
+    const el = row.querySelector("[data-aspect]");
+    row.classList.toggle("missing", row.dataset.req === "1" && !el.value.trim());
+  });
+}
+
+function findCategory() {
+  const q = $("catQuery").value.trim() || $("title").value.trim();
+  if (!q) return;
+  $("catList").innerHTML = '<div class="hint">検索中…</div>';
+  App.suggestCategories(q);
+}
+
+function chooseCategory(id, name) {
+  $("catList").innerHTML = '<div class="hint">項目を読み込み中…</div>';
+  App.loadAspects(id, name);
+}
+
+// ---------------------------------------------------------------- 出品
+function publish() {
+  if (!draft || busy) return;
+  const errs = [];
+  const title = $("title").value.trim();
+  if (!title) errs.push("タイトルが空です。");
+  if (title.length > 80) errs.push("タイトルは 80 文字以内にしてください。");
+  const price = parseFloat($("price").value);
+  if (!(price > 0)) errs.push("価格を入れてください。");
+  const values = currentAspectValues();
+  const missing = aspectDefs.filter(d => d.required && !values[d.name]).map(d => d.name);
+  if (missing.length) errs.push("必須の Item Specifics が未入力です: " + missing.join(", "));
+  if (!$("photos").children.length) errs.push("写真が 1 枚以上必要です。");
+  if (errs.length) { $("pubErr").textContent = errs.join("\n"); return; }
+
+  if (!confirm(`${$("price").value} ${state.currency} で eBay に出品します。よろしいですか？`)) return;
+  busy = true;
+  $("publishBtn").disabled = true;
+  $("publishBtn").textContent = "出品しています…";
+  $("pubErr").textContent = ""; $("pubOk").innerHTML = "";
+  $("logCard").classList.remove("hidden");
+  App.publish(JSON.stringify({
+    title, price: price.toFixed(2), quantity: parseInt($("qty").value || "1", 10) || 1,
+    category_id: draft.category_id, condition: $("condition2").value,
+    condition_description: $("condDesc").value.trim(), description_html: $("desc").value,
+    brand: $("brand").value.trim(), mpn: $("mpn").value.trim(), gtin: $("gtin").value.trim(),
+    aspects: values,
+  }));
+}
+
+function donePublish() {
+  busy = false;
+  $("publishBtn").disabled = false;
+  $("publishBtn").textContent = "eBay に出品する";
+}
+
+function resetItem() {
+  draft = null;
+  $("jan").value = ""; $("notes").value = "";
+  $("draftCard").classList.add("hidden");
+  $("logCard").classList.add("hidden");
+  App.clearItem();
+  window.scrollTo(0, 0);
+}
+
+// ---------------------------------------------------------------- ネイティブからのイベント
+window.__native = (kind, d) => {
+  switch (kind) {
+    case "photos":
+      $("photos").innerHTML = d.photos.map(p => `<div><img src="${p.thumb}"><b onclick="App.removePhoto('${esc(p.id)}')">×</b></div>`).join("");
+      break;
+    case "jan": $("jan").value = d.code; break;
+    case "progress": log(d.text); break;
+    case "draft": doneAnalyze(); log("下書きができました"); showDraft(d); break;
+    case "categories":
+      $("catList").innerHTML = d.list.map(c => `<button class="btn" onclick="chooseCategory('${esc(c.category_id)}', this.dataset.n)" data-n="${esc(c.path)}">${esc(c.path)}<br><span class="hint">${esc(c.category_id)}</span></button>`).join("") || '<div class="hint">見つかりませんでした</div>';
+      break;
+    case "aspects": {
+      const keep = currentAspectValues();
+      draft.category_id = d.category_id; draft.category_name = d.category_name;
+      $("catName").textContent = `${d.category_name}（${d.category_id}）`;
+      $("catList").innerHTML = "";
+      renderAspects(d.defs, keep);
+      break;
+    }
+    case "login": setLogin(d.loggedIn); $("loginErr").textContent = ""; break;
+    case "account": {
+      const p = d.policies;
+      const opt = arr => [["", "（選択）"]].concat(arr.map(x => [x.id, x.name]));
+      fillOptions($("fulfillmentPolicyId"), opt(p.fulfillment));
+      fillOptions($("paymentPolicyId"), opt(p.payment));
+      fillOptions($("returnPolicyId"), opt(p.return));
+      fillOptions($("locationKey"), [["", "（選択）"]].concat(d.locations.map(l => [l.key, `${l.name || l.key}（${l.key}）`])));
+      applySettings(d.settings);
+      // 1 つしか無いものは自動で選ぶ
+      [["fulfillmentPolicyId", p.fulfillment], ["paymentPolicyId", p.payment], ["returnPolicyId", p.return]]
+        .forEach(([k, arr]) => { if (!$(k).value && arr.length === 1) $(k).value = arr[0].id; });
+      if (!$("locationKey").value && d.locations.length === 1) $("locationKey").value = d.locations[0].key;
+      $("accountErr").textContent = (p.fulfillment.length && p.payment.length && p.return.length) ? "" :
+        "ポリシーが見つかりません。eBay の Seller Hub でビジネスポリシーを作成してください。";
+      saveSettings(false);
+      break;
+    }
+    case "published":
+      donePublish();
+      $("pubOk").innerHTML = `<div class="okmsg">出品しました（Item ID: ${esc(d.listingId)} / SKU: ${esc(d.sku)}）</div>
+        <div class="row" style="margin-top:8px"><button class="btn" data-u="${esc(d.url)}" onclick="App.openUrl(this.dataset.u)">eBay で見る</button>
+        <button class="btn" onclick="resetItem()">次の商品へ</button></div>`;
+      log("出品が完了しました");
+      break;
+    case "error":
+      if (d.where === "analyze") { doneAnalyze(); $("err").textContent = d.message; }
+      else if (d.where === "publish") { donePublish(); $("pubErr").textContent = d.message; }
+      else if (d.where === "login") { $("loginErr").textContent = d.message; }
+      else if (d.where === "account") { $("accountErr").textContent = d.message; }
+      else if (d.where === "category") { $("catList").innerHTML = `<div class="err">${esc(d.message)}</div>`; }
+      else { App.toast(d.message); }
+      break;
+  }
+};
+
+// ---------------------------------------------------------------- 初期化
+fillOptions($("condition"), Object.entries(state.conditions), "NEW");
+fillOptions($("condition2"), Object.entries(state.conditions), "NEW");
+fillOptions($("marketplace"), Object.entries(state.marketplaces));
+applySettings(state.settings);
+setLogin(state.loggedIn);
+$("cur").textContent = state.currency;
+App.refreshPhotos();
+if (!state.settings.claudeKey) tab("settings");
+</script>
+</body>
+</html>
